@@ -8,14 +8,23 @@
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
 
+// Represents a 48-bit MAC address, with 16 bits of padding of course
+typedef union {
+    uint8_t bytes[6];
+    uint64_t raw;
+} mac_addr_t;
+
+
+// Represents MAC address table entry
 typedef struct {
     bool used;
-    uint8_t mac_addr[6];
+    mac_addr_t mac_addr;
     uint8_t iface;
     time_t created;
 } entry_t;
 
 
+// Prints the contents of the MAC address table to stdout.
 void vsw_print_mac_table(entry_t *tbl) {
     printf("MAC ADDR           INT       AGE\n");
     printf("==================================\n");
@@ -24,7 +33,7 @@ void vsw_print_mac_table(entry_t *tbl) {
             continue;
         }
         for (int j = 0; j < 6; j++) {
-            printf("%02x", tbl[i].mac_addr[j]);
+            printf("%02x", tbl[i].mac_addr.bytes[j]);
             if (j == 1 || j == 3) {
                 printf("%c", '.');
             }
@@ -33,7 +42,10 @@ void vsw_print_mac_table(entry_t *tbl) {
     }
 }
 
-
+/*
+Adds a new entry to the MAC address table. If full, the new entry
+will override the oldest entry in the table (by age parameter)
+*/
 void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, uint8_t iface) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
@@ -42,7 +54,7 @@ void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, uint8_t iface) {
         .iface = iface,
         .created = time(NULL)
     };
-    memcpy(new.mac_addr, mac_addr, 6);
+    memcpy(new.mac_addr.bytes, mac_addr, 6);
 
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
