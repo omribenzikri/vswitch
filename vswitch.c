@@ -2,9 +2,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <time.h>
 #include <stdbool.h>
+#include <time.h>
+#include <unistd.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
 
@@ -75,6 +79,19 @@ int main() {
     entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, VSW_MAC_ADDR_TBL_SIZE * sizeof(entry_t));
 
+    struct sockaddr_in vsw_addr = {
+        .sin_family = AF_INET,
+        .sin_addr = htonl(INADDR_ANY),
+        .sin_port = htons(9200)
+    };
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    int ret = bind(sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
+    if (ret == -1) {
+        perror("vswitch");
+        return EXIT_FAILURE;
+    }
+
     uint8_t e1_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     uint8_t e2_mac[] = {0xAB, 0x55, 0x1A, 0xC7, 0x99, 0xFF};
 
@@ -82,6 +99,8 @@ int main() {
     vsw_add_entry(mac_addr_tbl, e2_mac, 2);
 
     vsw_print_mac_table(mac_addr_tbl);
+
+    close(sockfd);
 
     return EXIT_SUCCESS;
 }
