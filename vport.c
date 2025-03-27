@@ -21,7 +21,7 @@ typedef struct {
 } vport_t;
 
 
-int tap_alloc() {
+int tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
         perror("vport");
@@ -31,7 +31,7 @@ int tap_alloc() {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
-    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", "tap0");
+    snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", name);
 
     // Take ownership of the TAP
     int ret = ioctl(tapfd, TUNSETIFF, &ifr);
@@ -78,8 +78,10 @@ void forward_data_to_vswitch(vport_t *vport) {
 
 
 int main() {
-    const int tapfd = tap_alloc();
+    // Open TAP interface
+    const int tapfd = tap_alloc("tap0");
 
+    // Set up underlay UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     vport_t vport = {
         .tapfd = tapfd,
