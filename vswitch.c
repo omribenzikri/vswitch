@@ -49,9 +49,10 @@ void vsw_print_mac_table(entry_t *tbl) {
 
 /*
 Adds a new entry to the MAC address table. If full, the new entry
-will override the oldest entry in the table (by age parameter)
+will override the oldest entry in the table (by age parameter).
+The entry index is returned.
 */
-void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
+int vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
     entry_t new = {
@@ -65,12 +66,12 @@ void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
         // If an entry for this MAC addres already exists, just reset the age
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
             tbl[i].created = time(NULL);
-            return;
+            return i;
         }
         // Unused slot found, insert the entry here
         if (!tbl[i].used) {
             tbl[i] = new;
-            return;
+            return i;
         // Look for the oldest entry in the list
         } else if (tbl[i].created < old_age) {
             old_age = tbl[i].created;
@@ -80,6 +81,24 @@ void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
 
     // Replace the oldest entry in the table
     tbl[old_idx] = new;
+    return old_idx;
+}
+
+/*
+Searches for a relavent entry in the MAC address table for
+the given destination address. If an entry is found, it's index is returned,
+otherwise, -1 is returned.
+*/
+int vsw_search_entry(entry_t *tbl, uint8_t *mac_addr) {
+    for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+        if (!tbl[i].used) {
+            continue;
+        }
+        else if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 
@@ -111,7 +130,7 @@ int main() {
 
     while (true) {
         // Receive a frame from the socket
-        ret = recvfrom(
+        int ether_bytes_recvd = recvfrom(
             sockfd,
             frame_buf,
             sizeof(frame_buf),
@@ -119,18 +138,48 @@ int main() {
             (struct sockaddr *)&vport_addr,
             &vport_addr_len
         );
-        if (ret == -1) {
+        if (ether_bytes_recvd == -1) {
             perror("vswitch");
             return EXIT_FAILURE;
         }
-        assert(ret > ETHER_HDR_LEN);
+        assert(ether_bytes_recvd > ETHER_HDR_LEN);
     
         // Parse the header (first 14 bytes of the frame)
         struct ether_header *hdr = (struct ether_header *)frame_buf;
 
         // Add the source address to the table
-        vsw_add_entry(mac_addr_tbl, hdr->ether_shost, &vport_addr);
+        int src_entry_idx = vsw_add_entry(mac_addr_tbl, hdr->ether_shost, &vport_addr);
+
+        system("clear");
         vsw_print_mac_table(mac_addr_tbl);
+
+        int dst_entry_idx = vsw_search_entry(mac_addr_tbl, hdr->ether_dhost);
+        if (dst_entry_idx = -1) {
+            // Flood the frame through all interfaces except the source
+            for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+                if (!mac_addr_tbl[i].used || i == src_entry_idx) {
+                    continue;
+                }
+                sendto(
+                    sockfd,
+                    frame_buf,
+                    ether_bytes_recvd,
+                    0,
+                    (struct sockaddr *)&mac_addr_tbl[i].vport,
+                    vport_addr_len
+                );
+            }
+        } else {
+            // Forward the frame through the socket
+            sendto(
+                sockfd,
+                frame_buf,
+                ether_bytes_recvd,
+                0,
+                (struct sockaddr *)&mac_addr_tbl[dst_entry_idx].vport,
+                vport_addr_len
+            );
+        }
     }
 
     close(sockfd);
