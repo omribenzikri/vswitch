@@ -12,6 +12,7 @@
 #include <net/ethernet.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <pthread.h>
 
 // Represents an interface in the virtual overlay network
 typedef struct {
@@ -47,7 +48,9 @@ int tap_alloc(char *name) {
 Continously reads incoming data from the TAP interface and when it arrives,
 orwards it through the underlay UDP socket
 */
-void forward_data_to_vswitch(vport_t *vport) {
+void *forward_data_to_vswitch(void *_vport) {
+    vport_t *vport = (vport_t *)_vport;
+
     // Buffer for storing read ethernet frames
     uint8_t ether_frame[ETHER_MAX_LEN];
     ssize_t ether_bytes_read;
@@ -76,6 +79,43 @@ void forward_data_to_vswitch(vport_t *vport) {
     }
 }
 
+/*
+Continously reads incoming data from the underlay socket and forwards it
+through the TAP to the linux kernel networking stack
+*/
+void *forward_data_to_tap(void *_vport) {
+    vport_t *vport = (vport_t *)_vport;
+
+    // Buffer for storing received ethernet frames
+    uint8_t ether_frame[ETHER_MAX_LEN];
+    ssize_t ether_bytes_recvd;
+    socklen_t vsw_addr_size = sizeof(struct sockaddr_in);
+    int ret;
+
+    while (true) {
+        // Receive a frame from the socket
+        ether_bytes_recvd = recvfrom(
+            vport->sockfd,
+            ether_frame,
+            sizeof(ether_frame),
+            0,
+            (struct sockaddr *)&vport->vsw_addr,
+            &vsw_addr_size
+        );
+        if (ether_bytes_recvd == -1) {
+            perror("vport");
+            exit(EXIT_FAILURE);
+        }
+        assert(ether_bytes_recvd > ETHER_HDR_LEN);
+
+        // Write the frame to the TAP
+        ret = write(vport->tapfd, ether_frame, ether_bytes_recvd);
+        if (ret == -1) {
+            perror("vport");
+            exit(EXIT_FAILURE);
+        }
+    }
+}
 
 int main() {
     // Open TAP interface
@@ -93,7 +133,15 @@ int main() {
         }
     };
 
-    forward_data_to_vswitch(&vport);
+    pthread_t read_thread_id;
+    pthread_t write_thread_id;
+
+    // Start two threads - one for receiving and one for sending
+    pthread_create(&read_thread_id, NULL, &forward_data_to_vswitch, &vport);
+    pthread_create(&write_thread_id, NULL, &forward_data_to_tap, &vport);
+
+    pthread_join(read_thread_id, NULL);
+    pthread_join(write_thread_id, NULL);
 
     close(tapfd);
     close(sockfd);
