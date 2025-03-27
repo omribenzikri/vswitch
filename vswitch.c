@@ -9,40 +9,41 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <net/ethernet.h>
+#include <assert.h>
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
-
-// Represents a 48-bit MAC address, with 16 bits of padding of course
-typedef union {
-    uint8_t bytes[6];
-    uint64_t raw;
-} mac_addr_t;
-
 
 // Represents MAC address table entry
 typedef struct {
     bool used;
-    mac_addr_t mac_addr;
-    uint8_t iface;
     time_t created;
+    uint8_t mac_addr[ETHER_ADDR_LEN];
+    struct sockaddr_in *vport;
 } entry_t;
 
 
 // Prints the contents of the MAC address table to stdout.
 void vsw_print_mac_table(entry_t *tbl) {
-    printf("MAC ADDR           INT       AGE\n");
-    printf("==================================\n");
+    printf("MAC ADDR           VPORT                     AGE\n");
+    printf("================================================\n");
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
             continue;
         }
-        for (int j = 0; j < 6; j++) {
-            printf("%02x", tbl[i].mac_addr.bytes[j]);
+        for (int j = 0; j < ETHER_ADDR_LEN; j++) {
+            printf("%02x", tbl[i].mac_addr[j]);
             if (j == 1 || j == 3) {
                 printf("%c", '.');
             }
         }
-        printf("     %d         %ld\n", tbl[i].iface, time(NULL) - tbl[i].created);
+
+        char addr_buf[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &tbl[i].vport->sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+            fprintf(stderr, "Failed to stringify vport IP address.\n");
+            exit(EXIT_FAILURE);
+        }
+        printf("     %s:%u          %ld\n", addr_buf, tbl[i].vport->sin_port, time(NULL) - tbl[i].created);
     }
 }
 
@@ -50,20 +51,27 @@ void vsw_print_mac_table(entry_t *tbl) {
 Adds a new entry to the MAC address table. If full, the new entry
 will override the oldest entry in the table (by age parameter)
 */
-void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, uint8_t iface) {
+void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
     entry_t new = {
         .used = true,
-        .iface = iface,
+        .vport = vport,
         .created = time(NULL)
     };
-    memcpy(new.mac_addr.bytes, mac_addr, 6);
+    memcpy(new.mac_addr, mac_addr, ETHER_ADDR_LEN);
 
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+        // If an entry for this MAC addres already exists, just reset the age
+        if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
+            tbl[i].created = time(NULL);
+            return;
+        }
+        // Unused slot found, insert the entry here
         if (!tbl[i].used) {
             tbl[i] = new;
             return;
+        // Look for the oldest entry in the list
         } else if (tbl[i].created < old_age) {
             old_age = tbl[i].created;
             old_idx = i;
@@ -76,9 +84,10 @@ void vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, uint8_t iface) {
 
 
 int main() {
-    entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
-    memset(mac_addr_tbl, 0, VSW_MAC_ADDR_TBL_SIZE * sizeof(entry_t));
+    // Set up the MAC address table
+    entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE] = {0};
 
+    // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
         .sin_family = AF_INET,
         .sin_addr = htonl(INADDR_ANY),
@@ -86,19 +95,43 @@ int main() {
     };
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
 
+    // Bind vswitch UDP socket
     int ret = bind(sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
     if (ret == -1) {
         perror("vswitch");
         return EXIT_FAILURE;
     }
 
-    uint8_t e1_mac[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    uint8_t e2_mac[] = {0xAB, 0x55, 0x1A, 0xC7, 0x99, 0xFF};
+    // Buffers for storing received ethernet frames and their headers
+    uint8_t frame_buf[ETHER_MAX_LEN];
+    uint8_t hdr_buf[ETHER_HDR_LEN];
 
-    vsw_add_entry(mac_addr_tbl, e1_mac, 1);
-    vsw_add_entry(mac_addr_tbl, e2_mac, 2);
+    struct sockaddr_in vport_addr;
+    socklen_t vport_addr_len = sizeof(vport_addr);
 
-    vsw_print_mac_table(mac_addr_tbl);
+    while (true) {
+        // Receive a frame from the socket
+        ret = recvfrom(
+            sockfd,
+            frame_buf,
+            sizeof(frame_buf),
+            0,
+            (struct sockaddr *)&vport_addr,
+            &vport_addr_len
+        );
+        if (ret == -1) {
+            perror("vswitch");
+            return EXIT_FAILURE;
+        }
+        assert(ret > ETHER_HDR_LEN);
+    
+        // Parse the header (first 14 bytes of the frame)
+        struct ether_header *hdr = (struct ether_header *)frame_buf;
+
+        // Add the source address to the table
+        vsw_add_entry(mac_addr_tbl, hdr->ether_shost, &vport_addr);
+        vsw_print_mac_table(mac_addr_tbl);
+    }
 
     close(sockfd);
 
