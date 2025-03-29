@@ -19,7 +19,7 @@ typedef struct {
     bool used;
     time_t created;
     uint8_t mac_addr[ETHER_ADDR_LEN];
-    struct sockaddr_in *vport;
+    struct sockaddr_in vport;
 } entry_t;
 
 
@@ -39,11 +39,11 @@ void vsw_print_mac_table(entry_t *tbl) {
         }
 
         char addr_buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &tbl[i].vport->sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+        if (inet_ntop(AF_INET, &tbl[i].vport.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
-        printf("     %s:%u          %ld\n", addr_buf, tbl[i].vport->sin_port, time(NULL) - tbl[i].created);
+        printf("     %s:%u          %ld\n", addr_buf, tbl[i].vport.sin_port, time(NULL) - tbl[i].created);
     }
 }
 
@@ -57,7 +57,7 @@ int vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
     time_t old_age = LONG_MAX;
     entry_t new = {
         .used = true,
-        .vport = vport,
+        .vport = *vport,
         .created = time(NULL)
     };
     memcpy(new.mac_addr, mac_addr, ETHER_ADDR_LEN);
@@ -82,6 +82,7 @@ int vsw_add_entry(entry_t *tbl, uint8_t *mac_addr, struct sockaddr_in *vport) {
     // Replace the oldest entry in the table
     tbl[old_idx] = new;
     return old_idx;
+
 }
 
 /*
@@ -104,7 +105,8 @@ int vsw_search_entry(entry_t *tbl, uint8_t *mac_addr) {
 
 int main() {
     // Set up the MAC address table
-    entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE] = {0};
+    entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
+    memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
 
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
@@ -127,6 +129,8 @@ int main() {
 
     struct sockaddr_in vport_addr;
     socklen_t vport_addr_len = sizeof(vport_addr);
+
+    vsw_print_mac_table(mac_addr_tbl);
 
     while (true) {
         // Receive a frame from the socket
