@@ -128,7 +128,7 @@ int main() {
         .sockfd = sockfd,
         .vsw_addr = {
             .sin_family = AF_INET,
-            .sin_addr = inet_addr("127.0.0.1"),
+            .sin_addr = inet_addr("192.168.64.5"),
             .sin_port = htons(9200)
         }
     };
