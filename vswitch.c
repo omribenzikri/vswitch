@@ -130,6 +130,7 @@ int main() {
     struct sockaddr_in vport_addr;
     socklen_t vport_addr_len = sizeof(vport_addr);
 
+    system("clear");
     vsw_print_mac_table(mac_addr_tbl);
 
     while (true) {
