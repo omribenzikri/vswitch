@@ -22,7 +22,7 @@ typedef struct {
 } vport_t;
 
 
-int tap_alloc(char *name) {
+int vp_tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
         perror("vport");
@@ -48,7 +48,7 @@ int tap_alloc(char *name) {
 Continously reads incoming data from the TAP interface and when it arrives,
 orwards it through the underlay UDP socket
 */
-void *forward_data_to_vswitch(void *_vport) {
+void *vp_forward_data_to_vswitch(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
     // Buffer for storing read ethernet frames
@@ -83,7 +83,7 @@ void *forward_data_to_vswitch(void *_vport) {
 Continously reads incoming data from the underlay socket and forwards it
 through the TAP to the linux kernel networking stack
 */
-void *forward_data_to_tap(void *_vport) {
+void *vp_forward_data_to_tap(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
     // Buffer for storing received ethernet frames
@@ -119,7 +119,7 @@ void *forward_data_to_tap(void *_vport) {
 
 int main() {
     // Open TAP interface
-    const int tapfd = tap_alloc("tap0");
+    const int tapfd = vp_tap_alloc("tap0");
 
     // Set up underlay UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -137,8 +137,8 @@ int main() {
     pthread_t write_thread_id;
 
     // Start two threads - one for receiving and one for sending
-    pthread_create(&read_thread_id, NULL, &forward_data_to_vswitch, &vport);
-    pthread_create(&write_thread_id, NULL, &forward_data_to_tap, &vport);
+    pthread_create(&read_thread_id, NULL, &vp_forward_data_to_vswitch, &vport);
+    pthread_create(&write_thread_id, NULL, &vp_forward_data_to_tap, &vport);
 
     pthread_join(read_thread_id, NULL);
     pthread_join(write_thread_id, NULL);
