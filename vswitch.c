@@ -11,9 +11,10 @@
 #include <netinet/in.h>
 #include <net/ethernet.h>
 #include <assert.h>
+#include <pthread.h>
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
-#define VSW_VIFACE_ARR_SIZE 32
+#define VSW_VIFACE_ARR_SIZE 24
 
 // Represents a virtual interface
 typedef struct {
@@ -30,21 +31,26 @@ typedef struct {
     viface_t *viface;
 } entry_t;
 
+// Pretty-prints a MAC address where each four bytes are seperated by a dot
+void vsw_print_mac_addr(uint8_t *mac_addr) {
+    for (int i = 0; i < ETHER_ADDR_LEN; i++) {
+        printf("%02x", mac_addr[i]);
+        if (i == 1 || i == 3) {
+            printf("%c", '.');
+        }
+    }
+}
+
 
 // Prints the contents of the MAC address table to stdout.
 void vsw_print_mac_table(entry_t *tbl) {
-    printf("MAC ADDR           VPORT                     AGE\n");
-    printf("================================================\n");
+    printf("MAC ADDR           VPORT                       AGE\n");
+    printf("======================================================\n");
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
             continue;
         }
-        for (int j = 0; j < ETHER_ADDR_LEN; j++) {
-            printf("%02x", tbl[i].mac_addr[j]);
-            if (j == 1 || j == 3) {
-                printf("%c", '.');
-            }
-        }
+        vsw_print_mac_addr(tbl[i].mac_addr);
 
         char addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &tbl[i].viface->vport.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
@@ -142,7 +148,7 @@ int vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
         if (!tbl[i].used) {
             continue;
         }
-        else if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
+        if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
             return i;
         }
     }
@@ -150,7 +156,18 @@ int vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
 }
 
 
+void *vsw_print_ui(void *_tbl) {
+    entry_t *tbl = (entry_t *)_tbl;
+    while (true) {
+        system("clear");
+        vsw_print_mac_table(tbl);
+        sleep(1);
+    }
+}
+
+
 int main() {
+
     // Set up the MAC address table
     entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
@@ -158,6 +175,9 @@ int main() {
     // Set up the interface table
     viface_t viface_arr[VSW_VIFACE_ARR_SIZE];
     memset(viface_arr, 0, sizeof(viface_arr));
+
+    // L2 broadcast address
+    const uint8_t L2_BRDCST_ADDR[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
@@ -181,8 +201,9 @@ int main() {
     struct sockaddr_in vport_addr;
     socklen_t vport_addr_len = sizeof(vport_addr);
 
-    system("clear");
-    vsw_print_viface_array(viface_arr);
+    // Start UI thread
+    pthread_t ui_thread_pid;
+    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &mac_addr_tbl);
 
     while (true) {
         // Receive a frame from the socket
@@ -211,11 +232,19 @@ int main() {
         // Add new MAC address table entry
         vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, &viface_arr[src_viface_idx]);
 
-        system("clear");
-        vsw_print_viface_array(viface_arr);
+        bool flood = false;
+        int dst_entry_idx = -1;
+        
+        // Check if frame is broadcast
+        if (memcmp(hdr->ether_dhost, L2_BRDCST_ADDR, ETHER_ADDR_LEN) == 0) {
+            flood = true;
+        } else {
+            // Search the MAC address table for the dest addr
+            dst_entry_idx = vsw_search_mac_entry(mac_addr_tbl, hdr->ether_dhost);
+            flood = dst_entry_idx == -1;
+        }
 
-        int dst_entry_idx = vsw_search_mac_entry(mac_addr_tbl, hdr->ether_dhost);
-        if (dst_entry_idx = -1) {
+        if (flood) {
             // Flood the frame through all interfaces except the source
             for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
                 if (!viface_arr[i].used || i == src_viface_idx) {
