@@ -58,8 +58,8 @@ void *vp_forward_data_to_vswitch(void *_vport) {
     uint8_t ether_frame[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
     ssize_t ether_bytes_read;
 
-    // Set packet type to 0 - meaning regular arbitrary traffic
-    ether_frame[0] = 0;
+    // Set message type to regular traffic
+    ether_frame[0] = VSW_TUN_MSG_TRFC;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
