@@ -5,9 +5,11 @@
 #define VSW_TUN_ENCAP_SIZE 1
 
 // Different message types for tunnel header
-#define VSW_TUN_ENCAP_TRFC 0 // Regular arbitrary traffic
-#define VSW_TUN_ENCAP_HRTBT 1 // Heartbeat
-#define VSW_TUN_ENCAP_OK 2 // OK to join - there is room on the vswitch
-#define VSW_TUN_ENCAP_FULL 3 // Cannot join - vswitch is full
+typedef enum {
+    VSW_TUN_MSG_TRFC, // Regular arbitrary traffic
+    VSW_TUN_MSG_HRTBT, // Heartbeat
+    VSW_TUN_MSG_OK, // OK to join - there is room on the vswitch
+    VSW_TUN_MSG_FULL // Cannot join - vswitch is full 
+} tun_msg_type_t;
 
 #endif
