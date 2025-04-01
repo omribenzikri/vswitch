@@ -130,7 +130,7 @@ int vsw_add_viface(viface_t *arr, struct sockaddr_in *vport) {
         .vport = *vport
     };
     for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
-        // Interface already exists, jsut return
+        // Interface already exists, just return
         if (vport->sin_addr.s_addr == arr[i].vport.sin_addr.s_addr && vport->sin_port == arr[i].vport.sin_port) {
             return i;
         }
@@ -154,6 +154,19 @@ int vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
             continue;
         }
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/*
+Searches for a virtual interface in the interfaces array by socket pair.
+If found - returns the index, otherwise, returns -1
+*/
+int vsw_search_viface(viface_t *arr, struct sockaddr_in *vport) {
+    for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
+        if (vport->sin_addr.s_addr == arr[i].vport.sin_addr.s_addr && vport->sin_port == arr[i].vport.sin_port) {
             return i;
         }
     }
@@ -223,6 +236,10 @@ int main() {
             perror("vswitch");
             return EXIT_FAILURE;
         }
+        assert(ether_bytes_recvd > 0);
+
+        
+
         assert(ether_bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
     
         // Parse the header (first 14 bytes of the frame without the custom encap)
