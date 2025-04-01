@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/ether.h>
 #include <net/ethernet.h>
 #include <assert.h>
 #include <pthread.h>
@@ -22,7 +23,6 @@ typedef struct {
     struct sockaddr_in vport;
 } viface_t;
 
-
 // Represents MAC address table entry
 typedef struct {
     bool used;
@@ -31,18 +31,10 @@ typedef struct {
     viface_t *viface;
 } entry_t;
 
-// Pretty-prints a MAC address where each four bytes are seperated by a dot
-void vsw_print_mac_addr(uint8_t *mac_addr) {
-    for (int i = 0; i < ETHER_ADDR_LEN; i++) {
-        printf("%02x", mac_addr[i]);
-        if (i == 1 || i == 3) {
-            printf("%c", '.');
-        }
-    }
-}
 
-
-// Prints the contents of the MAC address table to stdout.
+/*
+Prints the contents of the MAC address table to stdout.
+*/
 void vsw_print_mac_table(entry_t *tbl) {
     printf("MAC ADDR           VPORT                       AGE\n");
     printf("======================================================\n");
@@ -50,19 +42,30 @@ void vsw_print_mac_table(entry_t *tbl) {
         if (!tbl[i].used) {
             continue;
         }
-        vsw_print_mac_addr(tbl[i].mac_addr);
+        
+        // Convert entry MAC address to string
+        char *mac_addr_str = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
 
-        char addr_buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &tbl[i].viface->vport.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+        // Convert socket IP address to string
+        char ip_addr_buf[INET_ADDRSTRLEN];
+        if (inet_ntop(AF_INET, &tbl[i].viface->vport.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
-        printf("     %s:%u          %ld\n", addr_buf, tbl[i].viface->vport.sin_port, time(NULL) - tbl[i].created);
+
+        printf(
+            "%s     %s:%u          %ld\n",
+            mac_addr_str, ip_addr_buf,
+            tbl[i].viface->vport.sin_port,
+            time(NULL) - tbl[i].created
+        );
     }
 }
 
-// Prints the contents of the virtual interface array to stdout.
-void vsw_print_viface_array(viface_t *arr) {
+/*
+Prints the contents of the virtual interface array to stdout.
+*/
+void vsw_print_viface_table(viface_t *arr) {
     printf("NAME           UNDERLAY SOCKET\n");
     printf("===================================\n");
     for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
@@ -70,6 +73,7 @@ void vsw_print_viface_array(viface_t *arr) {
             continue;
         }
 
+        // Convert socket IP address to string
         char addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &arr[i].vport.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
@@ -167,7 +171,6 @@ void *vsw_print_ui(void *_tbl) {
 
 
 int main() {
-
     // Set up the MAC address table
     entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
@@ -272,6 +275,7 @@ int main() {
         }
     }
 
+    // Close UDP socket
     close(sockfd);
 
     return EXIT_SUCCESS;
