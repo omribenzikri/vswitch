@@ -13,6 +13,7 @@
 #include <net/ethernet.h>
 #include <assert.h>
 #include <pthread.h>
+#include "common.h"
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
 #define VSW_VIFACE_ARR_SIZE 24
@@ -198,7 +199,7 @@ int main() {
     }
 
     // Buffers for storing received ethernet frames and their headers
-    uint8_t frame_buf[ETHER_MAX_LEN];
+    uint8_t frame_buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
     uint8_t hdr_buf[ETHER_HDR_LEN];
 
     struct sockaddr_in vport_addr;
@@ -222,10 +223,10 @@ int main() {
             perror("vswitch");
             return EXIT_FAILURE;
         }
-        assert(ether_bytes_recvd > ETHER_HDR_LEN);
+        assert(ether_bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
     
-        // Parse the header (first 14 bytes of the frame)
-        struct ether_header *hdr = (struct ether_header *)frame_buf;
+        // Parse the header (first 14 bytes of the frame without the custom encap)
+        struct ether_header *hdr = (struct ether_header *)(frame_buf + VSW_TUN_ENCAP_SIZE);
 
         // Add the source address to the table
         int src_viface_idx = vsw_add_viface(viface_arr, &vport_addr);
