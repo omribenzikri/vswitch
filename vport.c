@@ -13,6 +13,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
+#include "common.h"
 
 // Represents an interface in the virtual overlay network
 typedef struct {
@@ -53,13 +54,20 @@ orwards it through the underlay UDP socket
 void *vp_forward_data_to_vswitch(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
-    // Buffer for storing read ethernet frames
-    uint8_t ether_frame[ETHER_MAX_LEN];
+    // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
+    uint8_t ether_frame[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
     ssize_t ether_bytes_read;
+
+    // Set packet type to 0 - meaning regular arbitrary traffic
+    ether_frame[0] = 0;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
-        ether_bytes_read = read(vport->tapfd, ether_frame, sizeof(ether_frame));
+        ether_bytes_read = read(
+            vport->tapfd,
+            ether_frame + VSW_TUN_ENCAP_SIZE,
+            sizeof(ether_frame) - VSW_TUN_ENCAP_SIZE
+        );
         if (ether_bytes_read == -1) {
             perror("vport");
             exit(EXIT_FAILURE);
@@ -67,13 +75,13 @@ void *vp_forward_data_to_vswitch(void *_vport) {
         else if (ether_bytes_read == 0) {
             continue;
         }
-        assert(ether_bytes_read > 14);
+        assert(ether_bytes_read > ETHER_ADDR_LEN);
     
         // Forward the frame through the socket
         sendto(
             vport->sockfd,
             ether_frame,
-            ether_bytes_read,
+            ether_bytes_read + VSW_TUN_ENCAP_SIZE,
             0,
             (struct sockaddr *)&vport->vsw_addr,
             sizeof(vport->vsw_addr)
@@ -89,7 +97,7 @@ void *vp_forward_data_to_tap(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
     // Buffer for storing received ethernet frames
-    uint8_t ether_frame[ETHER_MAX_LEN];
+    uint8_t ether_frame[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
     ssize_t ether_bytes_recvd;
     socklen_t vsw_addr_size = sizeof(struct sockaddr_in);
     int ret;
@@ -108,10 +116,14 @@ void *vp_forward_data_to_tap(void *_vport) {
             perror("vport");
             exit(EXIT_FAILURE);
         }
-        assert(ether_bytes_recvd > ETHER_HDR_LEN);
+        assert(ether_bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
 
         // Write the frame to the TAP
-        ret = write(vport->tapfd, ether_frame, ether_bytes_recvd);
+        ret = write(
+            vport->tapfd,
+            ether_frame + VSW_TUN_ENCAP_SIZE,
+            ether_bytes_recvd - VSW_TUN_ENCAP_SIZE
+        );
         if (ret == -1) {
             perror("vport");
             exit(EXIT_FAILURE);
