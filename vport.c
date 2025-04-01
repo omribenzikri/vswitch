@@ -21,7 +21,9 @@ typedef struct {
     struct sockaddr_in vsw_addr;
 } vport_t;
 
-
+/*
+Get a file descriptor for TAP interface
+*/
 int vp_tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
@@ -143,6 +145,7 @@ int main() {
     pthread_join(read_thread_id, NULL);
     pthread_join(write_thread_id, NULL);
 
+    // Close TAP interface UDP socket
     close(tapfd);
     close(sockfd);
 
