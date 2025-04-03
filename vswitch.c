@@ -16,21 +16,28 @@
 #include "common.h"
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
-#define VSW_VIFACE_ARR_SIZE 24
+#define VSW_VPORT_ARR_SIZE 24
 
 // Represents a virtual interface
 typedef struct {
     bool used;
-    struct sockaddr_in vport;
-} viface_t;
+    struct sockaddr_in addr;
+} vport_t;
 
 // Represents MAC address table entry
 typedef struct {
     bool used;
     time_t created;
     uint8_t mac_addr[ETHER_ADDR_LEN];
-    viface_t *viface;
+    vport_t *vport;
 } entry_t;
+
+// Different opertional modes of a switch
+typedef enum {
+    OPER_FLOOD,
+    OPER_FORWARD,
+    OPER_FILTER
+} oper_mode_t;
 
 
 /*
@@ -49,7 +56,7 @@ void vsw_print_mac_table(entry_t *tbl) {
 
         // Convert socket IP address to string
         char ip_addr_buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &tbl[i].viface->vport.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
+        if (inet_ntop(AF_INET, &tbl[i].vport->addr.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
@@ -57,7 +64,7 @@ void vsw_print_mac_table(entry_t *tbl) {
         printf(
             "%s     %s:%u          %ld\n",
             mac_addr_str, ip_addr_buf,
-            tbl[i].viface->vport.sin_port,
+            tbl[i].vport->addr.sin_port,
             time(NULL) - tbl[i].created
         );
     }
@@ -66,22 +73,22 @@ void vsw_print_mac_table(entry_t *tbl) {
 /*
 Prints the contents of the virtual interface array to stdout.
 */
-void vsw_print_viface_table(viface_t *arr) {
+void vsw_print_vport_table(vport_t *arr) {
     printf("NAME           UNDERLAY SOCKET\n");
     printf("===================================\n");
-    for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         if (!arr[i].used) {
             continue;
         }
 
         // Convert socket IP address to string
         char addr_buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &arr[i].vport.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+        if (inet_ntop(AF_INET, &arr[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
 
-        printf("Virt/%02u        %s:%u\n", i + 1, addr_buf, arr[i].vport.sin_port);
+        printf("Virt/%02u        %s:%u\n", i + 1, addr_buf, arr[i].addr.sin_port);
     }
 }
 
@@ -89,12 +96,12 @@ void vsw_print_viface_table(viface_t *arr) {
 Adds a new entry to the MAC address table. If full, the new entry
 will override the oldest entry in the table (by age parameter).
 */
-void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, viface_t *viface) {
+void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
     entry_t new = {
         .used = true,
-        .viface = viface,
+        .vport = vport,
         .created = time(NULL)
     };
     memcpy(new.mac_addr, mac_addr, ETHER_ADDR_LEN);
@@ -121,56 +128,120 @@ void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, viface_t *viface) {
 }
 
 /*
-Adds a new interface to the array of interfaces. If the array has enough room,
-returns the index at which the new interface was inserted, otherwise, returns -1;
+Adds a new interface to the array of interfaces.
 */
-int vsw_add_viface(viface_t *arr, struct sockaddr_in *vport) {
-    viface_t new = {
+void vsw_add_vport(vport_t *arr, struct sockaddr_in *vport) {
+    vport_t new = {
         .used = true,
-        .vport = *vport
+        .addr = *vport
     };
-    for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Interface already exists, just return
-        if (vport->sin_addr.s_addr == arr[i].vport.sin_addr.s_addr && vport->sin_port == arr[i].vport.sin_port) {
-            return i;
+        if (vport->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && vport->sin_port == arr[i].addr.sin_port) {
+            return;
         }
         // Empty slot found, insert here
         if (!arr[i].used) {
             arr[i] = new;
-            return i;
+            return;
         }
     }
-    return -1;
 }
 
 /*
 Searches for a relavent entry in the MAC address table for
-the given destination address. If an entry is found, it's index is returned,
-otherwise, -1 is returned.
+the given destination address. If an entry is found, returns a pointer to the struct,
+otherwise, returns NULL
 */
-int vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
+entry_t *vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
             continue;
         }
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
-            return i;
+            return &tbl[i];
         }
     }
-    return -1;
+    return NULL;
 }
 
 /*
 Searches for a virtual interface in the interfaces array by socket pair.
-If found - returns the index, otherwise, returns -1
+If found - returns a pointer to the struct, otherwise, returns NULL
 */
-int vsw_search_viface(viface_t *arr, struct sockaddr_in *vport) {
-    for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
-        if (vport->sin_addr.s_addr == arr[i].vport.sin_addr.s_addr && vport->sin_port == arr[i].vport.sin_port) {
-            return i;
+vport_t *vsw_search_vport(vport_t *arr, struct sockaddr_in *vport_addr) {
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+        if (vport_addr->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && vport_addr->sin_port == arr[i].addr.sin_port) {
+            return &arr[i];
         }
     }
-    return -1;
+    return NULL;
+}
+
+/*
+Looks up the given destination MAC in the table in order to find a matching entry.
+If a matching entry is found - it is saved in the provided pointer, otherwise, NULL is saved.
+Based on whether an entry was found and based on the entry itself, the matching operation mode
+is returned.
+*/
+oper_mode_t vsw_determine_oper_mode(entry_t *mac_addr_tbl, uint8_t *mac_addr, vport_t *src_vport, entry_t **entry_ptr) {
+    // L2 broadcast address
+    const uint8_t L2_BRDCST_ADDR[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+    // Check if frame is broadcast
+    if (memcmp(mac_addr, L2_BRDCST_ADDR, ETHER_ADDR_LEN) == 0) {
+        *entry_ptr = NULL;
+        return OPER_FLOOD;
+    } else {
+        // Search the MAC address table for the dest address
+        *entry_ptr = vsw_search_mac_entry(mac_addr_tbl, mac_addr);
+        // No entry flood - need to flood unknown unicast
+        if (*entry_ptr == NULL) {
+            return OPER_FLOOD;
+        }
+        // Destination and source interfaces are the same, need to filter
+        if ((*entry_ptr)->vport == src_vport) {
+            return OPER_FILTER;
+        }
+        // Valid entry found - forward traffic
+        return OPER_FORWARD;
+    }
+}
+
+/*
+Floods received ethernet frame through all connected interfaces, except
+for the source interface.
+*/
+void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t *frame, ssize_t frame_size) {
+    // Flood the frame through all interfaces except the source
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+        // Skip flooding the traffic trough the source interface
+        if (!vport_arr[i].used || &vport_arr[i] == src_vport) {
+            continue;
+        }
+        sendto(
+            sockfd,
+            frame,
+            frame_size,
+            0,
+            (struct sockaddr *)&vport_arr[i].addr,
+            sizeof(struct sockaddr_in)
+        );
+    }
+}
+
+/*
+Forwards received ethernet frame through the provided virtual interface.
+*/
+void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame_size) {
+    sendto(
+        sockfd,
+        frame,
+        frame_size,
+        0,
+        (struct sockaddr *)&(vport->addr),
+        sizeof(struct sockaddr_in)
+    );
 }
 
 
@@ -190,11 +261,8 @@ int main() {
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
 
     // Set up the interface table
-    viface_t viface_arr[VSW_VIFACE_ARR_SIZE];
-    memset(viface_arr, 0, sizeof(viface_arr));
-
-    // L2 broadcast address
-    const uint8_t L2_BRDCST_ADDR[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    vport_t vport_arr[VSW_VPORT_ARR_SIZE];
+    memset(vport_arr, 0, sizeof(vport_arr));
 
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
@@ -203,6 +271,10 @@ int main() {
         .sin_port = htons(9200)
     };
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == -1) {
+        perror("vswitch");
+        return EXIT_FAILURE;
+    }
 
     // Bind vswitch UDP socket
     int ret = bind(sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
@@ -211,85 +283,59 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // Buffers for storing received ethernet frames and their headers
-    uint8_t frame_buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
-    uint8_t hdr_buf[ETHER_HDR_LEN];
-
-    struct sockaddr_in vport_addr;
-    socklen_t vport_addr_len = sizeof(vport_addr);
-
     // Start UI thread
     pthread_t ui_thread_pid;
     pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &mac_addr_tbl);
 
+    struct sockaddr_in vp_addr;
+    socklen_t vp_addr_len;
+    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
+
     while (true) {
         // Receive a frame from the socket
-        int ether_bytes_recvd = recvfrom(
+        ssize_t bytes_recvd = recvfrom(
             sockfd,
-            frame_buf,
-            sizeof(frame_buf),
+            buf,
+            sizeof(buf),
             0,
-            (struct sockaddr *)&vport_addr,
-            &vport_addr_len
+            (struct sockaddr *)&vp_addr,
+            &vp_addr_len
         );
-        if (ether_bytes_recvd == -1) {
+        if (bytes_recvd == -1) {
             perror("vswitch");
             return EXIT_FAILURE;
         }
-        assert(ether_bytes_recvd > 0);
+        assert(bytes_recvd > 0);
 
+        uint8_t *frame_type = buf;
+        uint8_t *ether_frame = buf + VSW_TUN_ENCAP_SIZE;
+        size_t ether_frame_size = bytes_recvd - VSW_TUN_ENCAP_SIZE;
         
-
-        assert(ether_bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
-    
-        // Parse the header (first 14 bytes of the frame without the custom encap)
-        struct ether_header *hdr = (struct ether_header *)(frame_buf + VSW_TUN_ENCAP_SIZE);
+        // Parse ethernet header
+        assert(ether_frame_size > ETHER_HDR_LEN);
+        struct ether_header *hdr = (struct ether_header *)ether_frame;
 
         // Add the source address to the table
-        int src_viface_idx = vsw_add_viface(viface_arr, &vport_addr);
+        vsw_add_vport(vport_arr, &vp_addr);
 
-        assert(src_viface_idx != -1); // handling not implemented yet
+        // Search for the interface by address
+        vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
+        assert(src_vport != NULL);
 
         // Add new MAC address table entry
-        vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, &viface_arr[src_viface_idx]);
+        vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, src_vport);
 
-        bool flood = false;
-        int dst_entry_idx = -1;
-        
-        // Check if frame is broadcast
-        if (memcmp(hdr->ether_dhost, L2_BRDCST_ADDR, ETHER_ADDR_LEN) == 0) {
-            flood = true;
-        } else {
-            // Search the MAC address table for the dest addr
-            dst_entry_idx = vsw_search_mac_entry(mac_addr_tbl, hdr->ether_dhost);
-            flood = dst_entry_idx == -1;
-        }
+        // Determine what to do with the frame
+        entry_t *dst_entry;
+        oper_mode_t mode = vsw_determine_oper_mode(mac_addr_tbl, hdr->ether_dhost, src_vport, &dst_entry);
 
-        if (flood) {
-            // Flood the frame through all interfaces except the source
-            for (int i = 0; i < VSW_VIFACE_ARR_SIZE; i++) {
-                if (!viface_arr[i].used || i == src_viface_idx) {
-                    continue;
-                }
-                sendto(
-                    sockfd,
-                    frame_buf,
-                    ether_bytes_recvd,
-                    0,
-                    (struct sockaddr *)&viface_arr[i].vport,
-                    vport_addr_len
-                );
-            }
-        } else {
-            // Forward the frame through the socket
-            sendto(
-                sockfd,
-                frame_buf,
-                ether_bytes_recvd,
-                0,
-                (struct sockaddr *)&mac_addr_tbl[dst_entry_idx].viface->vport,
-                vport_addr_len
-            );
+        switch (mode) {
+            case OPER_FLOOD:
+                vsw_flood_frame(sockfd, vport_arr, src_vport, buf, bytes_recvd);
+                break;
+            case OPER_FORWARD:
+                vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
+                break;
         }
     }
 

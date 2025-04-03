@@ -55,18 +55,18 @@ void *vp_forward_data_to_vswitch(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
     // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
-    uint8_t ether_frame[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
+    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
     ssize_t ether_bytes_read;
 
     // Set message type to regular traffic
-    ether_frame[0] = VSW_TUN_MSG_TRFC;
+    buf[0] = VSW_TUN_MSG_TRFC;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
         ether_bytes_read = read(
             vport->tapfd,
-            ether_frame + VSW_TUN_ENCAP_SIZE,
-            sizeof(ether_frame) - VSW_TUN_ENCAP_SIZE
+            buf + VSW_TUN_ENCAP_SIZE,
+            sizeof(buf) - VSW_TUN_ENCAP_SIZE
         );
         if (ether_bytes_read == -1) {
             perror("vport");
@@ -80,7 +80,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
         // Forward the frame through the socket
         sendto(
             vport->sockfd,
-            ether_frame,
+            buf,
             ether_bytes_read + VSW_TUN_ENCAP_SIZE,
             0,
             (struct sockaddr *)&vport->vsw_addr,
@@ -97,32 +97,31 @@ void *vp_forward_data_to_tap(void *_vport) {
     vport_t *vport = (vport_t *)_vport;
 
     // Buffer for storing received ethernet frames
-    uint8_t ether_frame[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
-    ssize_t ether_bytes_recvd;
-    socklen_t vsw_addr_size = sizeof(struct sockaddr_in);
+    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
+    ssize_t bytes_recvd;
+    socklen_t vsw_addr_size;
     int ret;
 
     while (true) {
         // Receive a frame from the socket
-        ether_bytes_recvd = recvfrom(
+        bytes_recvd = recvfrom(
             vport->sockfd,
-            ether_frame,
-            sizeof(ether_frame),
+            buf,
+            sizeof(buf),
             0,
             (struct sockaddr *)&vport->vsw_addr,
             &vsw_addr_size
         );
-        if (ether_bytes_recvd == -1) {
+        if (bytes_recvd == -1) {
             perror("vport");
             exit(EXIT_FAILURE);
         }
-        assert(ether_bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
-
+        assert(bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
         // Write the frame to the TAP
         ret = write(
             vport->tapfd,
-            ether_frame + VSW_TUN_ENCAP_SIZE,
-            ether_bytes_recvd - VSW_TUN_ENCAP_SIZE
+            buf + VSW_TUN_ENCAP_SIZE,
+            bytes_recvd - VSW_TUN_ENCAP_SIZE
         );
         if (ret == -1) {
             perror("vport");
