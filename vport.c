@@ -56,7 +56,8 @@ otherwise, -1 returned.
 int conn_vswitch(vport_t *vport) {
     const int JOIN_MAX_RETRIES = 5;
     const int RECV_TIMEOUT_SECS = 2;
-    uint8_t resp;
+    uint8_t req = VSW_TUN_MSG_JOIN;
+    uint8_t res;
     ssize_t bytes_recvd;
     socklen_t vsw_addr_size;
 
@@ -73,16 +74,16 @@ int conn_vswitch(vport_t *vport) {
     for (int i = 0; i < JOIN_MAX_RETRIES; i++) {
         sendto(
             vport->sockfd,
-            VSW_TUN_MSG_JOIN,
-            VSW_TUN_ENCAP_SIZE,
+            &req,
+            sizeof(req),
             0,
             (struct sockaddr *)&vport->vsw_addr,
             sizeof(vport->vsw_addr)
         );
         bytes_recvd = recvfrom(
             vport->sockfd,
-            resp,
-            sizeof(resp),
+            &res,
+            sizeof(res),
             0,
             (struct sockaddr *)&vport->vsw_addr,
             &vsw_addr_size
@@ -90,7 +91,7 @@ int conn_vswitch(vport_t *vport) {
         // Response received from vswitch
         if (bytes_recvd > 0) {
             setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
-            return resp;
+            return res;
         }
     }
 
