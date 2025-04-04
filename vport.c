@@ -199,7 +199,17 @@ int main() {
         }
     };
 
-    
+    int ret = conn_vswitch(&vport);
+    switch (ret)
+    {
+        case -1:
+            fprintf(stderr, "Error - connection to vswitch timed-out.\n");
+            break;
+        case VSW_TUN_MSG_FULL:
+            fprintf(stderr, "Error - cannot connect to vswitch since it is full.\n");
+        default:
+            break;
+    }
 
     pthread_t read_thread_id;
     pthread_t write_thread_id;
