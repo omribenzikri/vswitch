@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
+
 #include "common.h"
 
 // Represents an interface in the virtual overlay network
@@ -44,6 +46,57 @@ int vp_tap_alloc(char *name) {
         exit(EXIT_FAILURE);
     }
     return tapfd;
+}
+
+/*
+Attemps to connect to the vswitch by continously sending join requests
+until a response is received from the vswitch. If a response was received, it is returned,
+otherwise, -1 returned.
+*/
+int conn_vswitch(vport_t *vport) {
+    const int JOIN_MAX_RETRIES = 5;
+    const int RECV_TIMEOUT_SECS = 2;
+    uint8_t resp;
+    ssize_t bytes_recvd;
+    socklen_t vsw_addr_size;
+
+    struct timeval timeout_tv = {
+        .tv_sec = RECV_TIMEOUT_SECS,
+        .tv_usec = 0
+    };
+    struct timeval default_tv = {
+        .tv_sec = 0,
+        .tv_usec = 0
+    };
+    setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
+
+    for (int i = 0; i < JOIN_MAX_RETRIES; i++) {
+        sendto(
+            vport->sockfd,
+            VSW_TUN_MSG_JOIN,
+            VSW_TUN_ENCAP_SIZE,
+            0,
+            (struct sockaddr *)&vport->vsw_addr,
+            sizeof(vport->vsw_addr)
+        );
+        bytes_recvd = recvfrom(
+            vport->sockfd,
+            resp,
+            sizeof(resp),
+            0,
+            (struct sockaddr *)&vport->vsw_addr,
+            &vsw_addr_size
+        );
+        // Response received from vswitch
+        if (bytes_recvd > 0) {
+            setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
+            return resp;
+        }
+    }
+
+    // No response received from vswitch
+    setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
+    return -1;
 }
 
 
@@ -145,6 +198,8 @@ int main() {
             .sin_port = htons(9200)
         }
     };
+
+    
 
     pthread_t read_thread_id;
     pthread_t write_thread_id;

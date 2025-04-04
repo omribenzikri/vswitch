@@ -21,6 +21,7 @@
 // Represents a virtual interface
 typedef struct {
     bool used;
+    time_t last_seen;
     struct sockaddr_in addr;
 } vport_t;
 
@@ -107,9 +108,8 @@ void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
     memcpy(new.mac_addr, mac_addr, ETHER_ADDR_LEN);
 
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
-        // If an entry for this MAC addres already exists, just reset the age
+        // If an entry for this MAC addres already exists, just return
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
-            tbl[i].created = time(NULL);
             return;
         }
         // Unused slot found, insert the entry here
@@ -129,23 +129,27 @@ void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
 
 /*
 Adds a new interface to the array of interfaces.
+If there is room for a new connection, returns a pointer to the added object,
+otherwise, returns NULL
 */
-void vsw_add_vport(vport_t *arr, struct sockaddr_in *vport) {
+vport_t *vsw_add_vport(vport_t *arr, struct sockaddr_in *vport) {
     vport_t new = {
         .used = true,
+        .last_seen = time(NULL),
         .addr = *vport
     };
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Interface already exists, just return
         if (vport->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && vport->sin_port == arr[i].addr.sin_port) {
-            return;
+            return &arr[i];
         }
         // Empty slot found, insert here
         if (!arr[i].used) {
             arr[i] = new;
-            return;
+            return &arr[i];
         }
     }
+    return NULL;
 }
 
 /*
@@ -307,35 +311,66 @@ int main() {
         }
         assert(bytes_recvd > 0);
 
-        uint8_t *frame_type = buf;
-        uint8_t *ether_frame = buf + VSW_TUN_ENCAP_SIZE;
-        size_t ether_frame_size = bytes_recvd - VSW_TUN_ENCAP_SIZE;
-        
-        // Parse ethernet header
-        assert(ether_frame_size > ETHER_HDR_LEN);
-        struct ether_header *hdr = (struct ether_header *)ether_frame;
-
-        // Add the source address to the table
-        vsw_add_vport(vport_arr, &vp_addr);
-
-        // Search for the interface by address
-        vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
-        assert(src_vport != NULL);
-
-        // Add new MAC address table entry
-        vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, src_vport);
-
-        // Determine what to do with the frame
-        entry_t *dst_entry;
-        oper_mode_t mode = vsw_determine_oper_mode(mac_addr_tbl, hdr->ether_dhost, src_vport, &dst_entry);
-
-        switch (mode) {
-            case OPER_FLOOD:
-                vsw_flood_frame(sockfd, vport_arr, src_vport, buf, bytes_recvd);
+        uint8_t frame_type = *buf;
+        switch (frame_type)
+        {
+            case VSW_TUN_MSG_HRTBT:
+                // Heartbeat received - search for the vport by address
+                vport_t *vport = vsw_search_vport(vport_arr, &vp_addr);
+                if (vport == NULL) {
+                    continue;
+                }
+                // Reset the last seen parameter
+                vport->last_seen = time(NULL); 
                 break;
-            case OPER_FORWARD:
-                vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
+            case VSW_TUN_MSG_JOIN:
+                // Join message received - add a new virtual interface connection
+                vport_t *new_vport = vsw_add_vport(vport_arr, &vp_addr);
+                // Format an appropriate response
+                uint8_t response = new_vport == NULL ? VSW_TUN_MSG_FULL : VSW_TUN_MSG_FREE;
+                sendto(
+                    sockfd,
+                    &response,
+                    sizeof(response),
+                    0,
+                    (struct sockaddr *)&(vp_addr),
+                    sizeof(struct sockaddr_in)
+                );
                 break;
+            case VSW_TUN_MSG_TRFC:
+                // Strip the custom tunnel header
+                uint8_t *ether_frame = buf + VSW_TUN_ENCAP_SIZE;
+                size_t ether_frame_size = bytes_recvd - VSW_TUN_ENCAP_SIZE;
+                
+                // Parse ethernet header
+                assert(ether_frame_size > ETHER_HDR_LEN);
+                struct ether_header *hdr = (struct ether_header *)ether_frame;
+
+                // Search for the interface by address
+                vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
+                if (src_vport == NULL) {
+                    continue;
+                }
+
+                // Add new MAC address table entry
+                vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, src_vport);
+
+                // Determine what to do with the frame
+                entry_t *dst_entry;
+                oper_mode_t mode = vsw_determine_oper_mode(mac_addr_tbl, hdr->ether_dhost, src_vport, &dst_entry);
+
+                switch (mode)
+                {
+                    case OPER_FLOOD:
+                        vsw_flood_frame(sockfd, vport_arr, src_vport, buf, bytes_recvd);
+                        break;
+                    case OPER_FORWARD:
+                        vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
+                        break;
+                }
+                break;
+            default:
+                break;;
         }
     }
 
