@@ -51,7 +51,6 @@ void vsw_print_mac_table(entry_t *tbl) {
         if (!tbl[i].used) {
             continue;
         }
-        
         // Convert entry MAC address to string
         char *mac_addr_str = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
 
@@ -132,15 +131,15 @@ Adds a new interface to the array of interfaces.
 If there is room for a new connection, returns a pointer to the added object,
 otherwise, returns NULL
 */
-vport_t *vsw_add_vport(vport_t *arr, struct sockaddr_in *vport) {
+vport_t *vsw_add_vport(vport_t *arr, struct sockaddr_in *addr) {
     vport_t new = {
         .used = true,
         .last_seen = time(NULL),
-        .addr = *vport
+        .addr = *addr
     };
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Interface already exists, just return
-        if (vport->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && vport->sin_port == arr[i].addr.sin_port) {
+        if (addr->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && addr->sin_port == arr[i].addr.sin_port) {
             return &arr[i];
         }
         // Empty slot found, insert here
@@ -292,7 +291,7 @@ int main() {
     pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &mac_addr_tbl);
 
     struct sockaddr_in vp_addr;
-    socklen_t vp_addr_len;
+    socklen_t vp_addr_len = sizeof(vp_addr);
     uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
 
     while (true) {
@@ -333,7 +332,7 @@ int main() {
                     &response,
                     sizeof(response),
                     0,
-                    (struct sockaddr *)&(vp_addr),
+                    (struct sockaddr *)&vp_addr,
                     sizeof(struct sockaddr_in)
                 );
                 break;
@@ -367,10 +366,12 @@ int main() {
                     case OPER_FORWARD:
                         vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
                         break;
+                    default:
+                        break;
                 }
                 break;
             default:
-                break;;
+                break;
         }
     }
 
