@@ -68,7 +68,7 @@ void vsw_print_mac_table(entry_t *tbl) {
 Prints the contents of the virtual interface array to stdout.
 */
 void vsw_print_vport_table(vport_t *arr) {
-    printf("NAME           UNDERLAY SOCKET\n");
+    printf("NAME            UNDERLAY SOCKET\n");
     printf("===================================\n");
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         if (!arr[i].used) {
@@ -243,10 +243,10 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
 
 
 void *vsw_print_ui(void *_tbl) {
-    entry_t *tbl = (entry_t *)_tbl;
+    vport_t *tbl = (vport_t *)_tbl;
     while (true) {
         system("clear");
-        vsw_print_mac_table(tbl);
+        vsw_print_vport_table(tbl);
         sleep(1);
     }
 }
@@ -282,7 +282,7 @@ int main() {
 
     // Start UI thread
     pthread_t ui_thread_pid;
-    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &mac_addr_tbl);
+    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &vport_arr);
 
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
