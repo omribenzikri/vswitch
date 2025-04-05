@@ -205,9 +205,12 @@ int main() {
     {
         case -1:
             fprintf(stderr, "Error - connection to vswitch timed-out.\n");
+            exit(EXIT_FAILURE);
             break;
         case VSW_TUN_MSG_FULL:
             fprintf(stderr, "Error - cannot connect to vswitch since it is full.\n");
+            exit(EXIT_FAILURE);
+            break;
         default:
             break;
     }
