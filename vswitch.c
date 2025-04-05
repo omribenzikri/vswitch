@@ -45,7 +45,7 @@ typedef enum {
 Prints the contents of the MAC address table to stdout.
 */
 void vsw_print_mac_table(entry_t *tbl) {
-    printf("MAC ADDR           VPORT                       AGE\n");
+    printf("MAC ADDR               VPORT                       AGE\n");
     printf("======================================================\n");
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
@@ -60,13 +60,7 @@ void vsw_print_mac_table(entry_t *tbl) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
-
-        printf(
-            "%s     %s:%u          %ld\n",
-            mac_addr_str, ip_addr_buf,
-            tbl[i].vport->addr.sin_port,
-            time(NULL) - tbl[i].created
-        );
+        printf("%s      Virt/%-3d                    %ld\n", mac_addr_str, i + 9, time(NULL) - tbl[i].created);
     }
 }
 
@@ -88,7 +82,7 @@ void vsw_print_vport_table(vport_t *arr) {
             exit(EXIT_FAILURE);
         }
 
-        printf("Virt/%02u        %s:%u\n", i + 1, addr_buf, arr[i].addr.sin_port);
+        printf("Virt/%-3u        %s:%u\n", i + 1, addr_buf, arr[i].addr.sin_port);
     }
 }
 
