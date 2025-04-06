@@ -18,8 +18,8 @@
 #define VSW_MAC_ADDR_TBL_SIZE 32
 #define VSW_VPORT_ARR_SIZE 24
 
-#define VSW_MAC_ENTRY_MAX_AGE 20
-#define VSW_VPORT_MAX_INACTIVE 10
+#define VSW_MAC_ENTRY_MAX_AGE 300
+#define VSW_VPORT_MAX_INACTIVE 60
 
 // Represents a virtual interface
 typedef struct {
@@ -66,7 +66,7 @@ void vsw_print_mac_table(entry_t *tbl) {
         // Convert socket IP address to string
         char ip_addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &tbl[i].vport->addr.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
-            fprintf(stderr, "Failed to stringify vport IP address.\n");
+            fprintf(stderr, "vswitch: failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
         printf("%s      Virt/%-3d             %ld\n", mac_addr_str, i + 1, time(NULL) - tbl[i].created);
@@ -76,27 +76,27 @@ void vsw_print_mac_table(entry_t *tbl) {
 /*
 Prints the contents of the virtual interface array to stdout.
 */
-void vsw_print_vport_table(vport_t *arr) {
+void vsw_print_vport_table(vport_t *vports) {
     printf("NAME            UNDERLAY SOCKET            LAST SEEN\n");
     printf("==========================================================\n");
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
-        if (!arr[i].used) {
+        if (!vports[i].used) {
             continue;
         }
 
         // Convert socket IP address to string
         char addr_buf[INET_ADDRSTRLEN];
-        if (inet_ntop(AF_INET, &arr[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
-            fprintf(stderr, "Failed to stringify vport IP address.\n");
+        if (inet_ntop(AF_INET, &vports[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+            fprintf(stderr, "vswitch: failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
 
         // Join the IP address + port strings, 5 being the max numbers of digits in the max value of a port (stored in 16 bits)
         // and +1 for the delimiting colon
         char sock_pair_buf[INET_ADDRSTRLEN + 5 + 1];
-        snprintf(sock_pair_buf, sizeof(sock_pair_buf), "%s:%u", addr_buf, arr[i].addr.sin_port);
+        snprintf(sock_pair_buf, sizeof(sock_pair_buf), "%s:%u", addr_buf, vports[i].addr.sin_port);
 
-        printf("Virt/%-3u        %-22s     %ld seconds ago\n", i + 1, sock_pair_buf, time(NULL) - arr[i].last_seen);
+        printf("Virt/%-3u        %-22s     %ld seconds ago\n", i + 1, sock_pair_buf, time(NULL) - vports[i].last_seen);
     }
 }
 
@@ -139,7 +139,7 @@ Adds a new interface to the array of interfaces.
 If there is room for a new connection, returns a pointer to the added object,
 otherwise, returns NULL
 */
-vport_t *vsw_add_vport(vport_t *arr, struct sockaddr_in *addr) {
+vport_t *vsw_add_vport(vport_t *vports, struct sockaddr_in *addr) {
     vport_t new = {
         .used = true,
         .last_seen = time(NULL),
@@ -147,13 +147,13 @@ vport_t *vsw_add_vport(vport_t *arr, struct sockaddr_in *addr) {
     };
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Interface already exists, just return
-        if (addr->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && addr->sin_port == arr[i].addr.sin_port) {
-            return &arr[i];
+        if (addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && addr->sin_port == vports[i].addr.sin_port) {
+            return &vports[i];
         }
         // Empty slot found, insert here
-        if (!arr[i].used) {
-            arr[i] = new;
-            return &arr[i];
+        if (!vports[i].used) {
+            vports[i] = new;
+            return &vports[i];
         }
     }
     return NULL;
@@ -180,10 +180,10 @@ entry_t *vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
 Searches for a virtual interface in the interfaces array by socket pair.
 If found - returns a pointer to the struct, otherwise, returns NULL
 */
-vport_t *vsw_search_vport(vport_t *arr, struct sockaddr_in *vport_addr) {
+vport_t *vsw_search_vport(vport_t *vports, struct sockaddr_in *vport_addr) {
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
-        if (vport_addr->sin_addr.s_addr == arr[i].addr.sin_addr.s_addr && vport_addr->sin_port == arr[i].addr.sin_port) {
-            return &arr[i];
+        if (vport_addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && vport_addr->sin_port == vports[i].addr.sin_port) {
+            return &vports[i];
         }
     }
     return NULL;
@@ -224,13 +224,15 @@ Floods received ethernet frame through all connected interfaces, except
 for the source interface.
 */
 void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t *frame, ssize_t frame_size) {
+    ssize_t bytes_sent;
+
     // Flood the frame through all interfaces except the source
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Skip flooding the traffic trough the source interface
         if (!vport_arr[i].used || &vport_arr[i] == src_vport) {
             continue;
         }
-        sendto(
+        bytes_sent = sendto(
             sockfd,
             frame,
             frame_size,
@@ -238,6 +240,10 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
             (struct sockaddr *)&vport_arr[i].addr,
             sizeof(struct sockaddr_in)
         );
+        if (bytes_sent == -1) {
+            perror("vswitch");
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -245,7 +251,7 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
 Forwards received ethernet frame through the provided virtual interface.
 */
 void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame_size) {
-    sendto(
+    ssize_t bytes_sent = sendto(
         sockfd,
         frame,
         frame_size,
@@ -253,6 +259,10 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
         (struct sockaddr *)&(vport->addr),
         sizeof(struct sockaddr_in)
     );
+    if (bytes_sent == -1) {
+        perror("vswitch");
+        exit(EXIT_FAILURE);
+    }
 }
 
 /*
@@ -325,6 +335,7 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    // Group switch state data for passing into thread functions
     vswitch_t vswitch = {
         .vports = vport_arr,
         .mac_addr_tbl = mac_addr_tbl
@@ -375,7 +386,7 @@ int main() {
                 vport_t *new_vport = vsw_add_vport(vport_arr, &vp_addr);
                 // Format an appropriate response
                 uint8_t response = new_vport == NULL ? VSW_TUN_MSG_FULL : VSW_TUN_MSG_FREE;
-                sendto(
+                ssize_t bytes_sent = sendto(
                     sockfd,
                     &response,
                     sizeof(response),
@@ -383,6 +394,10 @@ int main() {
                     (struct sockaddr *)&vp_addr,
                     sizeof(struct sockaddr_in)
                 );
+                if (bytes_sent == -1) {
+                    perror("vswitch");
+                    exit(EXIT_FAILURE);
+                }
                 break;
             case VSW_TUN_MSG_TRFC:
                 // Strip the custom tunnel header
