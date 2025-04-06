@@ -14,8 +14,9 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
-
 #include "common.h"
+
+#define VP_HRTBT_INTRVAL 5
 
 // Represents an interface in the virtual overlay network
 typedef struct {
@@ -53,7 +54,7 @@ Attemps to connect to the vswitch by continously sending join requests
 until a response is received from the vswitch. If a response was received, it is returned,
 otherwise, -1 returned.
 */
-int conn_vswitch(vport_t *vport) {
+int vp_conn_vswitch(vport_t *vport) {
     const int JOIN_MAX_RETRIES = 5;
     const int RECV_TIMEOUT_SECS = 2;
     uint8_t req = VSW_TUN_MSG_JOIN;
@@ -98,6 +99,29 @@ int conn_vswitch(vport_t *vport) {
     // No response received from vswitch
     setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
     return -1;
+}
+
+/*
+Continously sends heartbeats messages to the vswitch to let it know the vport
+is still alive.
+*/
+void *vp_send_heartbeats(void *_vport) {
+    vport_t *vport = (vport_t *)_vport;
+    uint8_t msg = VSW_TUN_MSG_HRTBT;
+
+    // Send heartbeats in an infinite loop
+    while (true) {
+        sendto(
+            vport->sockfd,
+            &msg,
+            sizeof(msg),
+            0,
+            (struct sockaddr *)&vport->vsw_addr,
+            sizeof(vport->vsw_addr)
+        );
+        // Sleep until the next heartbeat
+        sleep(VP_HRTBT_INTRVAL);
+    }
 }
 
 
@@ -200,7 +224,7 @@ int main() {
         }
     };
 
-    int ret = conn_vswitch(&vport);
+    int ret = vp_conn_vswitch(&vport);
     switch (ret)
     {
         case -1:
@@ -217,13 +241,16 @@ int main() {
 
     pthread_t read_thread_id;
     pthread_t write_thread_id;
+    pthread_t heartbeat_thread_id;
 
     // Start two threads - one for receiving and one for sending
     pthread_create(&read_thread_id, NULL, &vp_forward_data_to_vswitch, &vport);
     pthread_create(&write_thread_id, NULL, &vp_forward_data_to_tap, &vport);
+    pthread_create(&heartbeat_thread_id, NULL, &vp_send_heartbeats, &vport);
 
     pthread_join(read_thread_id, NULL);
     pthread_join(write_thread_id, NULL);
+    pthread_join(heartbeat_thread_id, NULL);
 
     // Close TAP interface UDP socket
     close(tapfd);
