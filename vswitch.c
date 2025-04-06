@@ -68,8 +68,8 @@ void vsw_print_mac_table(entry_t *tbl) {
 Prints the contents of the virtual interface array to stdout.
 */
 void vsw_print_vport_table(vport_t *arr) {
-    printf("NAME            UNDERLAY SOCKET\n");
-    printf("===================================\n");
+    printf("NAME            UNDERLAY SOCKET            LAST SEEN\n");
+    printf("==========================================================\n");
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         if (!arr[i].used) {
             continue;
@@ -82,7 +82,12 @@ void vsw_print_vport_table(vport_t *arr) {
             exit(EXIT_FAILURE);
         }
 
-        printf("Virt/%-3u        %s:%u\n", i + 1, addr_buf, arr[i].addr.sin_port);
+        // Join the IP address + port strings, 5 being the max numbers of digits in the max value of a port (stored in 16 bits)
+        // and +1 for the delimiting colon
+        char sock_pair_buf[INET_ADDRSTRLEN + 5 + 1];
+        snprintf(sock_pair_buf, sizeof(sock_pair_buf), "%s:%u", addr_buf, arr[i].addr.sin_port);
+
+        printf("Virt/%-3u        %-22s     %ld secondss ago\n", i + 1, sock_pair_buf, time(NULL) - arr[i].last_seen);
     }
 }
 
