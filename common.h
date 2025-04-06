@@ -11,6 +11,6 @@ typedef enum {
     VSW_TUN_MSG_JOIN, // Join request
     VSW_TUN_MSG_FREE, // OK to join - there is room on the vswitch
     VSW_TUN_MSG_FULL // Cannot join - vswitch is full 
-} tun_msg_type_t;
+} vsw_tun_msg_t;
 
 #endif
