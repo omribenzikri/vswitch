@@ -18,6 +18,9 @@
 #define VSW_MAC_ADDR_TBL_SIZE 32
 #define VSW_VPORT_ARR_SIZE 24
 
+#define VSW_MAC_ENTRY_MAX_AGE 20
+#define VSW_VPORT_MAX_INACTIVE 10
+
 // Represents a virtual interface
 typedef struct {
     bool used;
@@ -33,6 +36,12 @@ typedef struct {
     vport_t *vport;
 } entry_t;
 
+// Represents the switch state data
+typedef struct {
+    vport_t *vports;
+    entry_t *mac_addr_tbl;
+} vswitch_t;
+
 // Different opertional modes of a switch
 typedef enum {
     OPER_FLOOD,
@@ -45,8 +54,8 @@ typedef enum {
 Prints the contents of the MAC address table to stdout.
 */
 void vsw_print_mac_table(entry_t *tbl) {
-    printf("MAC ADDR               VPORT                       AGE\n");
-    printf("======================================================\n");
+    printf("MAC ADDR               VPORT                AGE\n");
+    printf("==========================================================\n");
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
             continue;
@@ -60,7 +69,7 @@ void vsw_print_mac_table(entry_t *tbl) {
             fprintf(stderr, "Failed to stringify vport IP address.\n");
             exit(EXIT_FAILURE);
         }
-        printf("%s      Virt/%-3d                    %ld\n", mac_addr_str, i + 9, time(NULL) - tbl[i].created);
+        printf("%s      Virt/%-3d             %ld\n", mac_addr_str, i + 1, time(NULL) - tbl[i].created);
     }
 }
 
@@ -246,12 +255,43 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
     );
 }
 
+/*
+Removes inactive vports and deletes old MAC addres table entries.
+Should run in its own thread.
+*/
+void *vsw_cleanup(void * _vswitch) {
+    vswitch_t *vswitch = (vswitch_t *)_vswitch;
+    int age;
 
-void *vsw_print_ui(void *_tbl) {
-    vport_t *tbl = (vport_t *)_tbl;
+    // Continously look for objects to clean up
+    while (true) {
+        for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+            age = time(NULL) - vswitch->mac_addr_tbl[i].created;
+            // Check if the entry is too old
+            if (age > VSW_MAC_ENTRY_MAX_AGE) {
+                // Set entry to unused
+                vswitch->mac_addr_tbl[i].used = false;
+            }
+        }
+        for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+            age = time(NULL) - vswitch->vports[i].last_seen;
+            // Check if the vport is inactive
+            if (age > VSW_VPORT_MAX_INACTIVE) {
+                // Set slot to unused
+                vswitch->vports[i].used = false;
+            }
+        }
+    }
+}
+
+
+void *vsw_print_ui(void *_vswitch) {
+    vswitch_t *vswitch = (vswitch_t *)_vswitch;
     while (true) {
         system("clear");
-        vsw_print_vport_table(tbl);
+        vsw_print_mac_table(vswitch->mac_addr_tbl);
+        printf("\n\n");
+        vsw_print_vport_table(vswitch->vports);
         sleep(1);
     }
 }
@@ -285,9 +325,18 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    vswitch_t vswitch = {
+        .vports = vport_arr,
+        .mac_addr_tbl = mac_addr_tbl
+    };
+
     // Start UI thread
     pthread_t ui_thread_pid;
-    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &vport_arr);
+    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &vswitch);
+
+    // Start cleanup thread
+    pthread_t cleanup_thred_pid;
+    pthread_create(&cleanup_thred_pid, NULL, &vsw_cleanup, &vswitch);
 
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
