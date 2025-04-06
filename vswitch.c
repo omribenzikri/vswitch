@@ -87,7 +87,7 @@ void vsw_print_vport_table(vport_t *arr) {
         char sock_pair_buf[INET_ADDRSTRLEN + 5 + 1];
         snprintf(sock_pair_buf, sizeof(sock_pair_buf), "%s:%u", addr_buf, arr[i].addr.sin_port);
 
-        printf("Virt/%-3u        %-22s     %ld secondss ago\n", i + 1, sock_pair_buf, time(NULL) - arr[i].last_seen);
+        printf("Virt/%-3u        %-22s     %ld seconds ago\n", i + 1, sock_pair_buf, time(NULL) - arr[i].last_seen);
     }
 }
 
