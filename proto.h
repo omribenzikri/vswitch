@@ -1,6 +1,9 @@
 #ifndef _VSW_COMMON_H
 #define _VSW_COMMON_H 1
 
+// UDP port for vswitch
+#define VSW_UNDERLAY_PORT 9200
+
 // Size of custom tunnel encapsulation in bytes
 #define VSW_TUN_ENCAP_SIZE 1
 
