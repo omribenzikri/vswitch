@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,7 +15,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
-#include "common.h"
+#include "proto.h"
 
 #define VP_HRTBT_INTERVAL 5
 #define VP_JOIN_MAX_RETRIES 5
@@ -73,13 +74,14 @@ int vp_conn_vswitch(const vport_t *vport) {
         .tv_sec = 0,
         .tv_usec = 0
     };
+    
     // Set a timeout for the recv call
     ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
     if (ret == -1) {
         perror("vport");
         exit(EXIT_FAILURE);
     }
-
+    
     for (int i = 0; i < VP_JOIN_MAX_RETRIES; i++) {
         // Send a join request to the vswitch
         bytes_sent = sendto(
@@ -104,6 +106,9 @@ int vp_conn_vswitch(const vport_t *vport) {
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
             perror("vport");
             exit(EXIT_FAILURE);
         }
