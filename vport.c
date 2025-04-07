@@ -256,9 +256,12 @@ int main(int argc, char **argv) {
         printf("Usage: vport [ADDR] [TAP]\n");
         exit(EXIT_FAILURE);
     }
+    char log_buf[128];
 
     // Open TAP interface
     int tapfd = vp_tap_alloc(argv[2]);
+    snprintf(log_buf, sizeof(log_buf), "Successfully opened TAP interface: '%s'", argv[2]);
+    log_message(log_buf, LOG_INFO);
 
     // Set up underlay UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
@@ -290,6 +293,7 @@ int main(int argc, char **argv) {
             exit(EXIT_FAILURE);
             break;
         default:
+            log_message("Successfully connected to the vswitch.", LOG_INFO);
             break;
     }
 
