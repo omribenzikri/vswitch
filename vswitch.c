@@ -70,7 +70,7 @@ void vsw_print_mac_table(entry_t *tbl) {
         // Convert socket IP address to string
         char ip_addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &tbl[i].vport->addr.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
-            fprintf(stderr, "vswitch: failed to stringify vport IP address.\n");
+            log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         printf("%s      Virt/%-3d             %ld\n", mac_addr_str, i + 1, time(NULL) - tbl[i].created);
@@ -91,7 +91,7 @@ void vsw_print_vport_table(vport_t *vports) {
         // Convert socket IP address to string
         char addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &vports[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
-            fprintf(stderr, "vswitch: failed to stringify vport IP address.\n");
+            log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
 

@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include "proto.h"
+#include "logging.h"
 
 #define VP_HRTBT_INTERVAL 5
 #define VP_JOIN_MAX_RETRIES 5
@@ -35,7 +36,7 @@ Obtain ownership and return a file descriptor for TAP interface
 int vp_tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
-        perror("vport");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
     // Set up a request for our TAP
@@ -47,7 +48,7 @@ int vp_tap_alloc(char *name) {
     // Take ownership of the TAP
     int ret = ioctl(tapfd, TUNSETIFF, &ifr);
     if (ret == -1) {
-        perror("vport");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
     return tapfd;
@@ -78,7 +79,7 @@ int vp_conn_vswitch(const vport_t *vport) {
     // Set a timeout for the recv call
     ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
     if (ret == -1) {
-        perror("vport");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
     
@@ -93,7 +94,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         // Wait for a response from the vswitch
@@ -109,7 +110,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         // Response received from vswitch
@@ -117,7 +118,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             // Set timeout to the default
             ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
             if (ret == -1) {
-                perror("vport");
+                log_message(strerror(errno), LOG_CRITICAL);
                 exit(EXIT_FAILURE);
             }
             return res;
@@ -127,7 +128,7 @@ int vp_conn_vswitch(const vport_t *vport) {
     // No response received from vswitch, set timeout to the default
     ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
     if (ret == -1) {
-        perror("vport");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
     return -1;
@@ -153,7 +154,7 @@ void *vp_send_heartbeats(void *_vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         // Sleep until the next heartbeat
@@ -184,7 +185,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
             sizeof(buf) - VSW_TUN_ENCAP_SIZE
         );
         if (ether_bytes_read == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         else if (ether_bytes_read == 0) {
@@ -202,7 +203,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
     }
@@ -233,7 +234,7 @@ void *vp_forward_data_to_tap(void *_vport) {
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
         assert(bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
@@ -244,20 +245,25 @@ void *vp_forward_data_to_tap(void *_vport) {
             bytes_recvd - VSW_TUN_ENCAP_SIZE
         );
         if (ether_bytes_written == -1) {
-            perror("vport");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
     }
 }
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc < 3) {
+        printf("Usage: vport [ADDR] [TAP]\n");
+        exit(EXIT_FAILURE);
+    }
+
     // Open TAP interface
-    int tapfd = vp_tap_alloc("tap0");
+    int tapfd = vp_tap_alloc(argv[2]);
 
     // Set up underlay UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == -1) {
-        perror("vport");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
 
@@ -267,7 +273,7 @@ int main() {
         .sockfd = sockfd,
         .vsw_addr = {
             .sin_family = AF_INET,
-            .sin_addr = inet_addr("192.168.64.5"),
+            .sin_addr = inet_addr(argv[1]),
             .sin_port = htons(9200)
         }
     };
@@ -276,11 +282,11 @@ int main() {
     switch (ret)
     {
         case VP_VSWITCH_UNREACHABLE:
-            fprintf(stderr, "vport: connection to vswitch timed-out.\n");
+            log_message("Connection to vswitch timed-out.", LOG_ERROR);
             exit(EXIT_FAILURE);
             break;
         case VSW_TUN_MSG_FULL:
-            fprintf(stderr, "vport: cannot connect to vswitch since it is full.\n");
+            log_message("Cannot connect to vswitch since it is full.", LOG_ERROR);
             exit(EXIT_FAILURE);
             break;
         default:
