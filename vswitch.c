@@ -49,6 +49,8 @@ typedef enum {
     OPER_FILTER
 } oper_mode_t;
 
+// Global mutex used for synchronization
+static pthread_mutex_t lock;
 
 /*
 Prints the contents of the MAC address table to stdout.
@@ -275,6 +277,7 @@ void *vsw_cleanup(void * _vswitch) {
 
     // Continously look for objects to clean up
     while (true) {
+        pthread_mutex_lock(&lock);
         for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
             age = time(NULL) - vswitch->mac_addr_tbl[i].created;
             // Check if the entry is too old
@@ -291,6 +294,7 @@ void *vsw_cleanup(void * _vswitch) {
                 vswitch->vports[i].used = false;
             }
         }
+        pthread_mutex_unlock(&lock);
     }
 }
 
@@ -299,15 +303,18 @@ void *vsw_print_ui(void *_vswitch) {
     vswitch_t *vswitch = (vswitch_t *)_vswitch;
     while (true) {
         system("clear");
+        pthread_mutex_lock(&lock);
         vsw_print_mac_table(vswitch->mac_addr_tbl);
         printf("\n\n");
         vsw_print_vport_table(vswitch->vports);
         sleep(1);
+        pthread_mutex_unlock(&lock);
     }
 }
 
 
 int main() {
+
     // Set up the MAC address table
     entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
@@ -341,6 +348,9 @@ int main() {
         .mac_addr_tbl = mac_addr_tbl
     };
 
+    // Initialize mutex
+    pthread_mutex_init(&lock, NULL);
+
     // Start UI thread
     pthread_t ui_thread_pid;
     pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &vswitch);
@@ -369,6 +379,7 @@ int main() {
         }
         assert(bytes_recvd > 0);
 
+        pthread_mutex_lock(&lock);
         uint8_t frame_type = *buf;
         switch (frame_type)
         {
@@ -436,10 +447,14 @@ int main() {
             default:
                 break;
         }
+        pthread_mutex_unlock(&lock);
     }
 
     // Close UDP socket
     close(sockfd);
+
+    // Uninitialize mutex
+    pthread_mutex_destroy(&lock);
 
     return EXIT_SUCCESS;
 }
