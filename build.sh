@@ -1,13 +1,14 @@
 #!/bin/bash
 # TODO: use a build system
 
-mkdir tmp
+mkdir -p tmp
+mkdir -p bin
 
 # compile logging library
-gcc -c  -o tmp/logging.o logging.c
+gcc -c -o tmp/logging.o logging.c
 
 # compile vswitch
-gcc -c  -o tmp/vswitch.o vswitch.c
+gcc -c -o tmp/vswitch.o vswitch.c
 
 # compile vport
 gcc -c -o tmp/vport.o vport.c
