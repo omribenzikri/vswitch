@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <time.h>
+#include <errno.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -13,13 +14,14 @@
 #include <net/ethernet.h>
 #include <assert.h>
 #include <pthread.h>
-#include "common.h"
+#include "logging.h"
+#include "proto.h"
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
 #define VSW_VPORT_ARR_SIZE 24
 
 #define VSW_MAC_ENTRY_MAX_AGE 300
-#define VSW_VPORT_MAX_INACTIVE 60
+#define VSW_VPORT_MAX_INACTIVE 10
 
 // Represents a virtual interface
 typedef struct {
@@ -243,7 +245,7 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
             sizeof(struct sockaddr_in)
         );
         if (bytes_sent == -1) {
-            perror("vswitch");
+            log_message(strerror(errno), LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
     }
@@ -262,7 +264,7 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
         sizeof(struct sockaddr_in)
     );
     if (bytes_sent == -1) {
-        perror("vswitch");
+        log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
 }
@@ -274,11 +276,16 @@ Should run in its own thread.
 void *vsw_cleanup(void * _vswitch) {
     vswitch_t *vswitch = (vswitch_t *)_vswitch;
     int age;
+    char log_buf[64];
+    char addr_buf[INET_ADDRSTRLEN];
 
     // Continously look for objects to clean up
     while (true) {
         pthread_mutex_lock(&lock);
         for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+            if (!vswitch->mac_addr_tbl[i].used) {
+                continue;
+            }
             age = time(NULL) - vswitch->mac_addr_tbl[i].created;
             // Check if the entry is too old
             if (age > VSW_MAC_ENTRY_MAX_AGE) {
@@ -287,11 +294,20 @@ void *vsw_cleanup(void * _vswitch) {
             }
         }
         for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+            if (!vswitch->vports[i].used) {
+                continue;
+            }
             age = time(NULL) - vswitch->vports[i].last_seen;
             // Check if the vport is inactive
             if (age > VSW_VPORT_MAX_INACTIVE) {
                 // Set slot to unused
                 vswitch->vports[i].used = false;
+                if (inet_ntop(AF_INET,  &vswitch->vports[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+                    log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
+                    exit(EXIT_FAILURE);
+                }
+                snprintf(log_buf, sizeof(log_buf), "Removed inactive vport from underlay address: %s", addr_buf);
+                log_message(log_buf, LOG_INFO);
             }
         }
         pthread_mutex_unlock(&lock);
@@ -314,33 +330,40 @@ void *vsw_print_ui(void *_vswitch) {
 
 
 int main() {
+    char log_buf[128];
 
     // Set up the MAC address table
     entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
+    snprintf(log_buf, sizeof(log_buf), "Allocated MAC address table of size: %d", VSW_MAC_ADDR_TBL_SIZE);
+    log_message(log_buf, LOG_INFO);
 
     // Set up the interface table
     vport_t vport_arr[VSW_VPORT_ARR_SIZE];
     memset(vport_arr, 0, sizeof(vport_arr));
+    snprintf(log_buf, sizeof(log_buf), "Allocated %d virtual interfaces.", VSW_VPORT_ARR_SIZE);
+    log_message(log_buf, LOG_INFO);
 
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
         .sin_family = AF_INET,
         .sin_addr = htonl(INADDR_ANY),
-        .sin_port = htons(9200)
+        .sin_port = htons(VSW_UNDERLAY_PORT)
     };
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == -1) {
-        perror("vswitch");
+        log_message(strerror(errno), LOG_CRITICAL);
         return EXIT_FAILURE;
     }
 
     // Bind vswitch UDP socket
     int ret = bind(sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
     if (ret == -1) {
-        perror("vswitch");
+        log_message(strerror(errno), LOG_CRITICAL);
         return EXIT_FAILURE;
     }
+    snprintf(log_buf, sizeof(log_buf), "Bound underlay UDP socket to port: %d", VSW_UNDERLAY_PORT);
+    log_message(log_buf, LOG_INFO);
 
     // Group switch state data for passing into thread functions
     vswitch_t vswitch = {
@@ -351,13 +374,11 @@ int main() {
     // Initialize mutex
     pthread_mutex_init(&lock, NULL);
 
-    // Start UI thread
-    pthread_t ui_thread_pid;
-    pthread_create(&ui_thread_pid, NULL, &vsw_print_ui, &vswitch);
-
     // Start cleanup thread
     pthread_t cleanup_thred_pid;
     pthread_create(&cleanup_thred_pid, NULL, &vsw_cleanup, &vswitch);
+    snprintf(log_buf, sizeof(log_buf), "Started cleanup thread.");
+    log_message(log_buf, LOG_DEBUG);
 
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
@@ -374,7 +395,7 @@ int main() {
             &vp_addr_len
         );
         if (bytes_recvd == -1) {
-            perror("vswitch");
+            log_message(strerror(errno), LOG_CRITICAL);
             return EXIT_FAILURE;
         }
         assert(bytes_recvd > 0);
@@ -406,8 +427,18 @@ int main() {
                     sizeof(struct sockaddr_in)
                 );
                 if (bytes_sent == -1) {
-                    perror("vswitch");
+                    log_message(strerror(errno), LOG_CRITICAL);
                     exit(EXIT_FAILURE);
+                }
+
+                char addr_buf[INET_ADDRSTRLEN];
+                if (new_vport != NULL) {
+                    if (inet_ntop(AF_INET, &new_vport->addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+                        log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
+                        exit(EXIT_FAILURE);
+                    }
+                    snprintf(log_buf, sizeof(log_buf), "New vport connection from underlay address %s", addr_buf);
+                    log_message(log_buf, LOG_INFO);
                 }
                 break;
             case VSW_TUN_MSG_TRFC:
