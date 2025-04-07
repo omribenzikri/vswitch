@@ -347,7 +347,9 @@ int main() {
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
         .sin_family = AF_INET,
-        .sin_addr = htonl(INADDR_ANY),
+        .sin_addr = {
+            .s_addr = htonl(INADDR_ANY)
+        },
         .sin_port = htons(VSW_UNDERLAY_PORT)
     };
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);

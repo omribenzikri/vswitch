@@ -276,7 +276,9 @@ int main(int argc, char **argv) {
         .sockfd = sockfd,
         .vsw_addr = {
             .sin_family = AF_INET,
-            .sin_addr = inet_addr(argv[1]),
+            .sin_addr = {
+                .s_addr = inet_addr(argv[1])
+            },
             .sin_port = htons(9200)
         }
     };
