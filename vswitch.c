@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/un.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -55,53 +56,126 @@ typedef enum {
 static pthread_mutex_t lock;
 
 /*
-Prints the contents of the MAC address table to stdout.
+Generates a string representation of the MAC address table and stores it in a heap-allocated buffer.
+Returns the size of the string, not including the null terminator.
 */
-void vsw_print_mac_table(entry_t *tbl) {
-    printf("MAC ADDR               VPORT                AGE\n");
-    printf("==========================================================\n");
+size_t vsw_mac_table_to_str(entry_t *tbl, char **buf) {
+    const size_t OUT_BASE_SIZE = 1024;
+    const size_t MAX_ROW_SIZE = 48;
+    char heading[] = "MAC ADDR               VPORT                AGE\n==========================================================\n";
+
+    size_t buf_size = OUT_BASE_SIZE;
+    size_t str_size = 0;
+    ssize_t row_size;
+    char *mac_addr_buf;
+    char ip_addr_buf[INET_ADDRSTRLEN];
+    char row_buf[MAX_ROW_SIZE];
+    
+    // Heap-allocate base buffer
+    char *tmp_buf = malloc(buf_size * sizeof(char));
+    if (tmp_buf == NULL) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE); 
+    }
+
+    // Copy heading to the buffer
+    strcpy(tmp_buf, heading);
+    str_size += sizeof(heading);
+
     for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
         if (!tbl[i].used) {
             continue;
         }
         // Convert entry MAC address to string
-        char *mac_addr_str = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
+        mac_addr_buf = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
 
         // Convert socket IP address to string
-        char ip_addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &tbl[i].vport->addr.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
             log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
-        printf("%s      Virt/%-3d             %ld\n", mac_addr_str, i + 1, time(NULL) - tbl[i].created);
+
+        // Construct row
+        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%s      Virt/%-3d             %ld\n", mac_addr_buf, i + 1, time(NULL) - tbl[i].created);
+
+        // Allocate more memory if needed
+        str_size += row_size;
+        if (str_size >= buf_size) {
+            buf_size += OUT_BASE_SIZE;
+            tmp_buf = realloc(tmp_buf, buf_size * sizeof(char));
+            if (tmp_buf == NULL) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE); 
+            }
+        }
+
+        // Concatenate new row (+1 for null terminator)
+        strncat(tmp_buf, row_buf, row_size + 1);
     }
+    *buf = tmp_buf;
+    return str_size - 1;
 }
 
 /*
-Prints the contents of the virtual interface array to stdout.
+Generates a string representation of the vport able and stores it in a heap-allocated buffer.
+Returns the size of the string, not including the null terminator.
 */
-void vsw_print_vport_table(vport_t *vports) {
-    printf("NAME            UNDERLAY SOCKET            LAST SEEN\n");
-    printf("==========================================================\n");
+size_t vsw_vport_table_to_str(vport_t *vports, char **buf) {
+    const size_t OUT_BASE_SIZE = 1024;
+    const size_t MAX_ROW_SIZE = 64;
+    char heading[] = "NAME            UNDERLAY SOCKET            LAST SEEN\n==========================================================\n";
+
+    size_t buf_size = OUT_BASE_SIZE;
+    size_t str_size = 0;
+    ssize_t row_size;
+    char addr_buf[INET_ADDRSTRLEN];
+    char sock_pair_buf[INET_ADDRSTRLEN + 5 + 1]; // +5 for port and +1 for delimeter
+    char row_buf[MAX_ROW_SIZE];
+    
+    // Heap-allocate base buffer
+    char *tmp_buf = malloc(buf_size * sizeof(char));
+    if (tmp_buf == NULL) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE); 
+    }
+
+    // Copy heading to the buffer
+    strcpy(tmp_buf, heading);
+    str_size += sizeof(heading);
+
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         if (!vports[i].used) {
             continue;
         }
 
         // Convert socket IP address to string
-        char addr_buf[INET_ADDRSTRLEN];
         if (inet_ntop(AF_INET, &vports[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
             log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
             exit(EXIT_FAILURE);
         }
 
-        // Join the IP address + port strings, 5 being the max numbers of digits in the max value of a port (stored in 16 bits)
-        // and +1 for the delimiting colon
-        char sock_pair_buf[INET_ADDRSTRLEN + 5 + 1];
+        // Joim vport IP address + source port
         snprintf(sock_pair_buf, sizeof(sock_pair_buf), "%s:%u", addr_buf, vports[i].addr.sin_port);
 
-        printf("Virt/%-3u        %-22s     %ld seconds ago\n", i + 1, sock_pair_buf, time(NULL) - vports[i].last_seen);
+        // Construct row
+        row_size = snprintf(row_buf, MAX_ROW_SIZE, "Virt/%-3u        %-22s     %ld seconds ago\n", i + 1, sock_pair_buf, time(NULL) - vports[i].last_seen);
+
+        // Allocate more memory if needed
+        str_size += row_size;
+        if (str_size >= buf_size) {
+            buf_size += OUT_BASE_SIZE;
+            tmp_buf = realloc(tmp_buf, buf_size * sizeof(char));
+            if (tmp_buf == NULL) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE); 
+            }
+        }
+
+        // Concatenate new row (+1 for null terminator)
+        strncat(tmp_buf, row_buf, row_size + 1);
     }
+    *buf = tmp_buf;
+    return str_size - 1;
 }
 
 /*
@@ -314,18 +388,149 @@ void *vsw_cleanup(void * _vswitch) {
     }
 }
 
-
-void *vsw_print_ui(void *_vswitch) {
+/*
+Waits for incoming shell connections over Unix domain sockets.
+Receives commands and returns appropriate responses.
+Runs on its own thread.
+*/
+void *vsw_shell_serve(void *_vswitch) {
     vswitch_t *vswitch = (vswitch_t *)_vswitch;
-    while (true) {
-        system("clear");
-        pthread_mutex_lock(&lock);
-        vsw_print_mac_table(vswitch->mac_addr_tbl);
-        printf("\n\n");
-        vsw_print_vport_table(vswitch->vports);
-        sleep(1);
-        pthread_mutex_unlock(&lock);
+
+    const char *SOCK_PATH = "/tmp/vswsh.sock";
+    char bad_cmd_msg[] = "Unrecognized command.";
+    const size_t BAD_CMD_MSG_LEN = sizeof(bad_cmd_msg) - 1;
+
+    // Buffer for storing user command
+    char *cmd = NULL;
+    char *out = NULL;
+    int server_sockfd;
+    int client_sockfd;
+    ssize_t len;
+    ssize_t bytes_read;
+    ssize_t bytes_written;
+    int ret;
+
+    // Specifies whether output data is allocated on the heap
+    bool out_on_heap = false;
+
+    // Delete previously allocated socket
+    unlink(SOCK_PATH);
+
+    // Set up Unix domain address
+    struct sockaddr_un sock_addr = {
+        .sun_family = AF_UNIX,
+    };
+    strncpy(sock_addr.sun_path, SOCK_PATH, sizeof(sock_addr.sun_path));
+
+    // Initialize Unix domain socket
+    server_sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (server_sockfd == -1) {
+        log_message(strerror(errno), LOG_CRITICAL);
+         exit(EXIT_FAILURE);
     }
+
+    // Bind socket
+    ret = bind(server_sockfd, (struct sockaddr *)&sock_addr, sizeof(sock_addr));
+    if (ret == -1) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE);
+    }
+    // Listen
+    ret = listen(server_sockfd, 1);
+    if (ret == -1) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE);
+    }
+    log_message("Bound local shell server socket.", LOG_INFO);
+
+    while (true) {
+        // Accept a new client connection
+        client_sockfd = accept(server_sockfd, NULL, NULL);
+        if (client_sockfd == -1) {
+            log_message(strerror(errno), LOG_CRITICAL);
+            exit(EXIT_FAILURE);
+        }
+        log_message("Local shell connected.", LOG_INFO);
+
+        while (true) {
+            // Read command length from the socket
+            bytes_read = read(client_sockfd, &len, sizeof(len));
+            if (bytes_read == -1) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);
+            }
+            else if (bytes_read == 0) {
+                log_message("Local shell disconnected.", LOG_INFO);
+                break;
+            }
+
+            // Heap-allocate buffer for command (+1 for null terminator)
+            cmd = malloc((len + 1) * sizeof(char));
+            if (cmd == NULL) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);        
+            }
+
+            // Read command and ensure null termination
+            bytes_read = read(client_sockfd, cmd, len * sizeof(char));
+            if (bytes_read == -1) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);
+            }
+            cmd[len] = '\0';
+
+            // For most commands, the output length is variable
+            out_on_heap = true;
+
+            // ENTER CRITICAL SECTION - accessing shared vswitch state data
+            pthread_mutex_lock(&lock);
+
+            if (strcmp(cmd, "macs") == 0) {
+                len = vsw_mac_table_to_str(vswitch->mac_addr_tbl, &out);
+            }
+            else if (strcmp(cmd, "vports") == 0) {
+                len = vsw_vport_table_to_str(vswitch->vports, &out);
+            }
+
+            else {
+                len = BAD_CMD_MSG_LEN;
+                out = bad_cmd_msg;
+                out_on_heap = false;
+            }
+
+            // EXIT CRITICAL SECTION
+            pthread_mutex_unlock(&lock);
+
+            // Write output length to the socket
+            bytes_written = write(client_sockfd, &len, sizeof(len));
+            if (bytes_written == -1) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);
+            }
+
+            // Write output to the socket
+            bytes_written = write(client_sockfd, out, len);
+            if (bytes_written == -1) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);
+            }
+
+            // Free command buffer
+            free(cmd);
+            cmd = NULL;
+
+            // Free output buffer if needed
+            if (out_on_heap) {
+                free(out);
+            }
+        }
+
+        // Close client socket
+        close(client_sockfd);
+    }
+
+    // Close server socket
+    close(server_sockfd);
 }
 
 
@@ -377,9 +582,15 @@ int main() {
     pthread_mutex_init(&lock, NULL);
 
     // Start cleanup thread
-    pthread_t cleanup_thred_pid;
-    pthread_create(&cleanup_thred_pid, NULL, &vsw_cleanup, &vswitch);
+    pthread_t cleanup_thread_pid;
+    pthread_create(&cleanup_thread_pid, NULL, &vsw_cleanup, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started cleanup thread.");
+    log_message(log_buf, LOG_DEBUG);
+
+    // Start shell server thread
+    pthread_t shell_thread_pid;
+    pthread_create(&shell_thread_pid, NULL, &vsw_shell_serve, &vswitch);
+    snprintf(log_buf, sizeof(log_buf), "Started shell server thread.");
     log_message(log_buf, LOG_DEBUG);
 
     struct sockaddr_in vp_addr;
@@ -410,6 +621,7 @@ int main() {
                 // Heartbeat received - search for the vport by address
                 vport_t *vport = vsw_search_vport(vport_arr, &vp_addr);
                 if (vport == NULL) {
+                    pthread_mutex_unlock(&lock);
                     continue;
                 }
                 // Reset the last seen parameter
@@ -455,6 +667,7 @@ int main() {
                 // Search for the interface by address
                 vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
                 if (src_vport == NULL) {
+                    pthread_mutex_unlock(&lock);
                     continue;
                 }
 
