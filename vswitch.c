@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -20,9 +21,15 @@
 
 #define VSW_MAC_ADDR_TBL_SIZE 32
 #define VSW_VPORT_ARR_SIZE 24
+#define VSW_NEIGHBORS_ARR_SIZE 4
 
 #define VSW_MAC_ENTRY_MAX_AGE 300
 #define VSW_VPORT_MAX_INACTIVE 10
+
+#define VSW_JOIN_MAX_RETRIES 5
+#define VSW_RECV_TIMEOUT 2
+#define VSW_PEER_UNREACHABLE -1
+#define VSW_HRTBT_INTERVAL 5
 
 // Represents a virtual interface
 typedef struct {
@@ -39,9 +46,18 @@ typedef struct {
     vport_t *vport;
 } entry_t;
 
+// Represents a neighbor vswitch
+typedef struct {
+    bool used;
+    struct sockaddr_in addr;
+} neighbor_t;
+
 // Represents the switch state data
 typedef struct {
+    int access_sockfd;
+    int trunk_sockfd;
     vport_t *vports;
+    neighbor_t *neighbors;
     entry_t *mac_addr_tbl;
 } vswitch_t;
 
@@ -214,8 +230,8 @@ void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
 
 /*
 Adds a new interface to the array of interfaces.
-If there is room for a new connection, returns a pointer to the added object,
-otherwise, returns NULL
+If there is room for a new connection, returns a pointer to the added object.
+Otherwise, returns NULL
 */
 vport_t *vsw_add_vport(vport_t *vports, struct sockaddr_in *addr) {
     vport_t new = {
@@ -232,6 +248,43 @@ vport_t *vsw_add_vport(vport_t *vports, struct sockaddr_in *addr) {
         if (!vports[i].used) {
             vports[i] = new;
             return &vports[i];
+        }
+    }
+    return NULL;
+}
+
+/*
+Returns whether there's an available empty slot for a new neighbor.
+*/
+bool vsw_free_neighbor_slot_exists(neighbor_t *neighbors) {
+    for (int i = 0; i < VSW_NEIGHBORS_ARR_SIZE; i++) {
+        // Empty slot found
+        if (!neighbors[i].used) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+Adds a new neighbor to the array of neighbors.
+If there is room for a new neighbor, returns a pointer to the added object.
+Otherwise, returns NULL.
+*/
+neighbor_t *vsw_add_neighbor(neighbor_t *neighbors, struct sockaddr_in *addr) {
+    neighbor_t new = {
+        .used = true,
+        .addr = *addr
+    };
+    for (int i = 0; i < VSW_NEIGHBORS_ARR_SIZE; i++) {
+        // If neighbor already exists, just return
+        if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
+            return &neighbors[i];
+        }
+        // Empty slot found, insert here
+        if (!neighbors[i].used) {
+            neighbors[i] = new;
+            return &neighbors[i];
         }
     }
     return NULL;
@@ -326,6 +379,56 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
 }
 
 /*
+Attemps to connect to a peer vswitch by continously sending join requests
+until a response is received from the peer. If a response was received, it is returned,
+otherwise, -1 returned.
+*/
+int vsw_conn_peer(int sockfd, struct sockaddr_in *addr) {
+    uint8_t req = VSW_TUN_MSG_JOIN;
+    uint8_t res;
+    ssize_t bytes_sent;
+    ssize_t bytes_recvd;
+    
+    for (int i = 0; i < VSW_JOIN_MAX_RETRIES; i++) {
+        // Send a join request to the peer vswitch
+        bytes_sent = sendto(
+            sockfd,
+            &req,
+            sizeof(req),
+            0,
+            (struct sockaddr *)addr,
+            sizeof(struct sockaddr_in)
+        );
+        if (bytes_sent == -1) {
+            log_message(strerror(errno), LOG_CRITICAL);
+            exit(EXIT_FAILURE);
+        }
+        // Wait for a response from the peer vswitch
+        bytes_recvd = recvfrom(
+            sockfd,
+            &res,
+            sizeof(res),
+            0,
+            NULL,
+            NULL
+        );
+        if (bytes_recvd == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            log_message(strerror(errno), LOG_CRITICAL);
+            exit(EXIT_FAILURE);
+        }
+        // Response received from peer vswitch
+        else if (bytes_recvd > 0) {
+            return res;
+        }
+    }
+    // No response received from peer vswitch
+    return VSW_PEER_UNREACHABLE;
+}
+
+/*
 Forwards received ethernet frame through the provided virtual interface.
 */
 void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame_size) {
@@ -340,6 +443,39 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
     if (bytes_sent == -1) {
         log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
+    }
+}
+
+/*
+Continously sends heartbeats to all neighbors to let them know the vswitch
+is still alive.
+*/
+void *vsw_send_heartbeats(void *_vswitch) {
+    const vswitch_t *vswitch = (const vswitch_t *)_vswitch;
+    uint8_t msg = VSW_TUN_MSG_HRTBT;
+    ssize_t bytes_sent;
+
+    // Send heartbeats in an infinite loop
+    while (true) {
+        for (int i = 0; i < VSW_NEIGHBORS_ARR_SIZE; i++) {
+            if (!vswitch->neighbors[i].used) {
+                continue;
+            }
+            bytes_sent = sendto(
+                vswitch->trunk_sockfd,
+                &msg,
+                sizeof(msg),
+                0,
+                (struct sockaddr *)&vswitch->neighbors[i].addr,
+                sizeof(struct sockaddr_in)
+            );
+            if (bytes_sent == -1) {
+                log_message(strerror(errno), LOG_CRITICAL);
+                exit(EXIT_FAILURE);
+            }
+        }
+        // Sleep until the next heartbeat
+        sleep(VSW_HRTBT_INTERVAL);
     }
 }
 
@@ -397,8 +533,15 @@ void *vsw_shell_serve(void *_vswitch) {
     vswitch_t *vswitch = (vswitch_t *)_vswitch;
 
     const char *SOCK_PATH = "/tmp/vswsh.sock";
+    const char *ARG_DELIM = " \r\n\t\a";
     char bad_cmd_msg[] = "Unrecognized command.";
-    const size_t BAD_CMD_MSG_LEN = sizeof(bad_cmd_msg) - 1;
+    char bad_obj_msg[] = "Unrecognized object.";
+    char bad_args_msg[] = "Incorrect number of arguments passed.";
+    char bad_addr_msg[] = "Invalid IP address supplied.";
+    char max_neighbors_msg[] = "Failed to connect to neighbor vswitch - all local neighbors slots are in use";
+    char conn_ok_msg[] = "Successfully connected to neighbor vswitch.";
+    char conn_full_msg[] = "Failed to connect to neighbor vswitch - no available vports on the peer.";
+    char conn_timeout_msg[] = "Failed to connect to neighbor vswitch - connection timed out.";
 
     // Buffer for storing user command
     char *cmd = NULL;
@@ -485,15 +628,79 @@ void *vsw_shell_serve(void *_vswitch) {
             // ENTER CRITICAL SECTION - accessing shared vswitch state data
             pthread_mutex_lock(&lock);
 
-            if (strcmp(cmd, "macs") == 0) {
-                len = vsw_mac_table_to_str(vswitch->mac_addr_tbl, &out);
-            }
-            else if (strcmp(cmd, "vports") == 0) {
-                len = vsw_vport_table_to_str(vswitch->vports, &out);
+            char *tok = strtok(cmd, ARG_DELIM);
+            if (tok == NULL) {
+                free(cmd);
+                cmd = NULL;
+                pthread_mutex_unlock(&lock);
+                continue;
             }
 
+            if (strcmp(tok, "show") == 0) {
+                tok = strtok(NULL, ARG_DELIM);
+                if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+                    len = sizeof(bad_args_msg) - 1;;
+                    out = bad_args_msg;
+                    out_on_heap = false;
+                }
+                else if (strcmp(tok, "macs") == 0) {
+                    len = vsw_mac_table_to_str(vswitch->mac_addr_tbl, &out);
+                }
+                else if (strcmp(tok, "vports") == 0) {
+                    len = vsw_vport_table_to_str(vswitch->vports, &out);
+                } else {
+                    len = sizeof(bad_obj_msg) - 1;;
+                    out = bad_obj_msg;
+                    out_on_heap = false;              
+                }
+            }
+            else if (strcmp(tok, "trunk") == 0) {
+                out_on_heap = false;
+                tok = strtok(NULL, ARG_DELIM);
+                if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+                    len = sizeof(bad_args_msg) - 1;;
+                    out = bad_args_msg;
+                }
+                else if (!vsw_free_neighbor_slot_exists(vswitch->neighbors)) {
+                    out = max_neighbors_msg;
+                    len = sizeof(max_neighbors_msg);
+                }
+                else {
+                    in_addr_t addr = inet_addr(tok);
+                    if (addr == -1) {
+                        len = sizeof(bad_addr_msg) - 1;;
+                        out = bad_addr_msg;
+                    }
+                    else {
+                        struct sockaddr_in peer_addr = {
+                            .sin_family = AF_INET,
+                            .sin_addr = {
+                                .s_addr = addr
+                            },
+                            .sin_port = htons(VSW_UNDERLAY_PORT)
+                        };
+                        ret = vsw_conn_peer(vswitch->trunk_sockfd, &peer_addr);
+                        switch (ret)
+                        {
+                            case VSW_PEER_UNREACHABLE:
+                                out = conn_timeout_msg;
+                                len = sizeof(conn_timeout_msg);
+                                break;
+                            case VSW_TUN_MSG_FULL:
+                                out = conn_full_msg;
+                                len = sizeof(conn_full_msg);
+                                break;
+                            default:
+                                out = conn_ok_msg;
+                                len = sizeof(conn_ok_msg);
+                                vsw_add_neighbor(vswitch->neighbors, &peer_addr);
+                                break;
+                        }
+                    }
+                }
+            }
             else {
-                len = BAD_CMD_MSG_LEN;
+                len = sizeof(bad_cmd_msg) - 1;;
                 out = bad_cmd_msg;
                 out_on_heap = false;
             }
@@ -549,6 +756,10 @@ int main() {
     snprintf(log_buf, sizeof(log_buf), "Allocated %d virtual interfaces.", VSW_VPORT_ARR_SIZE);
     log_message(log_buf, LOG_INFO);
 
+    // Set up neighbors array
+    neighbor_t neighbors_arr[VSW_NEIGHBORS_ARR_SIZE];
+    memset(neighbors_arr, 0, sizeof(neighbors_arr));
+
     // Set up vswitch UDP socket
     struct sockaddr_in vsw_addr = {
         .sin_family = AF_INET,
@@ -557,14 +768,14 @@ int main() {
         },
         .sin_port = htons(VSW_UNDERLAY_PORT)
     };
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd == -1) {
+    int access_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (access_sockfd == -1) {
         log_message(strerror(errno), LOG_CRITICAL);
         return EXIT_FAILURE;
     }
 
     // Bind vswitch UDP socket
-    int ret = bind(sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
+    int ret = bind(access_sockfd, (struct sockaddr *)&vsw_addr, sizeof(vsw_addr));
     if (ret == -1) {
         log_message(strerror(errno), LOG_CRITICAL);
         return EXIT_FAILURE;
@@ -572,9 +783,31 @@ int main() {
     snprintf(log_buf, sizeof(log_buf), "Bound underlay UDP socket to port: %d", VSW_UNDERLAY_PORT);
     log_message(log_buf, LOG_INFO);
 
+    // Initialize UDP socket configured with a set timeout - used for connecting
+    // to peer vswitches.
+    int trunk_sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (trunk_sockfd == -1) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE);
+    }
+    // Socket timeout timevalue
+    struct timeval timeout_tv = {
+        .tv_sec = VSW_RECV_TIMEOUT,
+        .tv_usec = 0
+    };
+    // Set a timeout for the recv call
+    ret = setsockopt(trunk_sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
+    if (ret == -1) {
+        log_message(strerror(errno), LOG_CRITICAL);
+        exit(EXIT_FAILURE);
+    }
+
     // Group switch state data for passing into thread functions
     vswitch_t vswitch = {
+        .access_sockfd = access_sockfd,
+        .trunk_sockfd = trunk_sockfd,
         .vports = vport_arr,
+        .neighbors = neighbors_arr,
         .mac_addr_tbl = mac_addr_tbl
     };
 
@@ -593,6 +826,12 @@ int main() {
     snprintf(log_buf, sizeof(log_buf), "Started shell server thread.");
     log_message(log_buf, LOG_DEBUG);
 
+    // Start neighbor heartbeat thread
+    pthread_t heartbeat_thread_pid;
+    pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_heartbeats, &vswitch);
+    snprintf(log_buf, sizeof(log_buf), "Started neighbor heartbeat thread.");
+    log_message(log_buf, LOG_DEBUG);
+
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
     uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
@@ -600,7 +839,7 @@ int main() {
     while (true) {
         // Receive a frame from the socket
         ssize_t bytes_recvd = recvfrom(
-            sockfd,
+            access_sockfd,
             buf,
             sizeof(buf),
             0,
@@ -633,7 +872,7 @@ int main() {
                 // Format an appropriate response
                 uint8_t response = new_vport == NULL ? VSW_TUN_MSG_FULL : VSW_TUN_MSG_FREE;
                 ssize_t bytes_sent = sendto(
-                    sockfd,
+                    access_sockfd,
                     &response,
                     sizeof(response),
                     0,
@@ -681,10 +920,10 @@ int main() {
                 switch (mode)
                 {
                     case OPER_FLOOD:
-                        vsw_flood_frame(sockfd, vport_arr, src_vport, buf, bytes_recvd);
+                        vsw_flood_frame(access_sockfd, vport_arr, src_vport, buf, bytes_recvd);
                         break;
                     case OPER_FORWARD:
-                        vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
+                        vsw_forward_frame(access_sockfd, dst_entry->vport, buf, bytes_recvd);
                         break;
                     default:
                         break;
@@ -696,8 +935,9 @@ int main() {
         pthread_mutex_unlock(&lock);
     }
 
-    // Close UDP socket
-    close(sockfd);
+    // Close UDP sockets
+    close(access_sockfd);
+    close(trunk_sockfd);
 
     // Uninitialize mutex
     pthread_mutex_destroy(&lock);
