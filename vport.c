@@ -131,7 +131,7 @@ int vp_conn_vswitch(const vport_t *vport) {
         log_message(strerror(errno), LOG_CRITICAL);
         exit(EXIT_FAILURE);
     }
-    return -1;
+    return VP_VSWITCH_UNREACHABLE;
 }
 
 /*
