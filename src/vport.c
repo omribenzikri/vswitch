@@ -16,9 +16,9 @@
 #include <stdbool.h>
 #include <pthread.h>
 #include "proto.h"
-#include "logging.h"
+#include "util/logging.h"
 
-#define VP_HRTBT_INTERVAL 5
+#define VP_HRTBT_INTERVAL 2
 #define VP_JOIN_MAX_RETRIES 5
 #define VP_RECV_TIMEOUT 2
 #define VP_VSWITCH_UNREACHABLE -1
@@ -36,7 +36,7 @@ Obtain ownership and return a file descriptor for TAP interface
 int vp_tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
-        log_message(strerror(errno), LOG_CRITICAL);
+        log_sys_error();
         exit(EXIT_FAILURE);
     }
     // Set up a request for our TAP
@@ -48,7 +48,7 @@ int vp_tap_alloc(char *name) {
     // Take ownership of the TAP
     int ret = ioctl(tapfd, TUNSETIFF, &ifr);
     if (ret == -1) {
-        log_message(strerror(errno), LOG_CRITICAL);
+        log_sys_error();
         exit(EXIT_FAILURE);
     }
     return tapfd;
@@ -79,7 +79,7 @@ int vp_conn_vswitch(const vport_t *vport) {
     // Set a timeout for the recv call
     ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
     if (ret == -1) {
-        log_message(strerror(errno), LOG_CRITICAL);
+        log_sys_error();
         exit(EXIT_FAILURE);
     }
     
@@ -94,7 +94,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
         // Wait for a response from the vswitch
@@ -110,7 +110,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 continue;
             }
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
         // Response received from vswitch
@@ -118,7 +118,7 @@ int vp_conn_vswitch(const vport_t *vport) {
             // Set timeout to the default
             ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
             if (ret == -1) {
-                log_message(strerror(errno), LOG_CRITICAL);
+                log_sys_error();
                 exit(EXIT_FAILURE);
             }
             return res;
@@ -128,7 +128,7 @@ int vp_conn_vswitch(const vport_t *vport) {
     // No response received from vswitch, set timeout to the default
     ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
     if (ret == -1) {
-        log_message(strerror(errno), LOG_CRITICAL);
+        log_sys_error();
         exit(EXIT_FAILURE);
     }
     return VP_VSWITCH_UNREACHABLE;
@@ -154,7 +154,7 @@ void *vp_send_heartbeats(void *_vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
         // Sleep until the next heartbeat
@@ -185,7 +185,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
             sizeof(buf) - VSW_TUN_ENCAP_SIZE
         );
         if (ether_bytes_read == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
         else if (ether_bytes_read == 0) {
@@ -203,7 +203,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
             sizeof(vport->vsw_addr)
         );
         if (bytes_sent == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
     }
@@ -234,7 +234,7 @@ void *vp_forward_data_to_tap(void *_vport) {
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
         assert(bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
@@ -245,7 +245,7 @@ void *vp_forward_data_to_tap(void *_vport) {
             bytes_recvd - VSW_TUN_ENCAP_SIZE
         );
         if (ether_bytes_written == -1) {
-            log_message(strerror(errno), LOG_CRITICAL);
+            log_sys_error();
             exit(EXIT_FAILURE);
         }
     }
@@ -266,7 +266,7 @@ int main(int argc, char **argv) {
     // Set up underlay UDP socket
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd == -1) {
-        log_message(strerror(errno), LOG_CRITICAL);
+        log_sys_error();
         exit(EXIT_FAILURE);
     }
 

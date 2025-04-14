@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <time.h>
-#include "logging.h"
+#include <string.h>
+#include <errno.h>
+#include "util/logging.h"
 
 void log_message(const char *message, enum LogSeverityLevel severity) {
     const char *severity_labels[] = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"};
@@ -17,4 +19,9 @@ void log_message(const char *message, enum LogSeverityLevel severity) {
 
     // Display formatted log message
     printf("[%s] [%s] %s\n", buf, severity_labels[severity], message);
+}
+
+void log_sys_error() {
+    // Log out message matching the current error stored in errno
+    log_message(strerror(errno), LOG_CRITICAL);
 }
