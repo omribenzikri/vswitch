@@ -1,26 +1,10 @@
 #ifndef _VSW_CORE_H
 #define _VSW_CORE_H
 
-#include <pthread.h>
-#include "vswitch/vport.h"
-#include "vswitch/fib.h"
-#include "vswitch/trunk.h"
+#include "vswitch/state.h"
 
 #define VSW_MAC_ENTRY_MAX_AGE 300
 #define VSW_VPORT_MAX_INACTIVE 10
-
-/*
-Represents the switch state data. This struct contains all
-vital data structure for the operation of the vswitch. It is meant to be passable
-to thread functions
-*/
-typedef struct {
-    int sockfd;
-    pthread_mutex_t *lock;
-    vport_t *vports;
-    neighbor_t *neighbors;
-    entry_t *mac_addr_tbl;
-} vswitch_t;
 
 /*
 Different opertional modes of a switch
@@ -30,7 +14,6 @@ typedef enum {
     OPER_FORWARD,
     OPER_FILTER
 } oper_mode_t;
-
 
 /*
 Looks up the given destination MAC in the table in order to find a matching entry.
@@ -55,5 +38,19 @@ Removes inactive vports and deletes old MAC addres table entries.
 This function should run in its own thread.
 */
 void *vsw_cleanup(void * _vswitch);
+
+/*
+Continuously sends JOIN requests to the given peer until its neighborship status is updated.
+The status is updated in the main application thread where all traffic is received and processed.
+If the maxmimum number of retries was exceeded and the neighborship is still in a pending status,
+the function deactivates the neighbor and sets its status accordingly.
+*/
+void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer);
+
+/*
+Continuously sends heartbeats to active peers to let them know that the vswitch is still alive.
+This function is meant to run on a separate thread.
+*/
+void *vsw_send_peer_heartbeats(void *_vswitch);
 
 #endif

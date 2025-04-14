@@ -39,7 +39,7 @@ neighbor_t *vsw_search_neighbor(neighbor_t *neighbors, struct sockaddr_in *addr)
 }
 
 
-void vsw_conn_peer(vswitch_t *vswitch, neighbor_t *peer) {
+void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer) {
     uint8_t req = VSW_TUN_MSG_JOIN;
     time_t last_req_time;
     ssize_t bytes_sent;
@@ -88,7 +88,7 @@ void vsw_conn_peer(vswitch_t *vswitch, neighbor_t *peer) {
 
 
 void *vsw_send_peer_heartbeats(void *_vswitch) {
-    const vswitch_t *vswitch = (vswitch_t *)_vswitch;
+    const vswitch_state_t *vswitch = (vswitch_state_t *)_vswitch;
     uint8_t msg = VSW_TUN_MSG_HRTBT;
     ssize_t bytes_sent;
 

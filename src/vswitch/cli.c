@@ -4,6 +4,7 @@
 #include <sys/un.h>
 #include "proto.h"
 #include "util/logging.h"
+#include "vswitch/core.h"
 #include "vswitch/cli.h"
 
 char *VSW_BAD_CMD_MSG  = "Unrecognized command.";
@@ -16,7 +17,7 @@ char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
 
 
-bool vsw_cli_process_cmd(vswitch_t *vswitch, char *cmd, char **out) {
+bool vsw_cli_process_cmd(vswitch_state_t *vswitch, char *cmd, char **out) {
     // Tokenize command
     const char *ARG_DELIM = " \r\n\t\a";
     char *tok = strtok(cmd, ARG_DELIM);
@@ -94,7 +95,7 @@ bool vsw_cli_process_cmd(vswitch_t *vswitch, char *cmd, char **out) {
 }
 
 
-bool vsw_cli_handle_client(vswitch_t *vswitch, int client_sockfd) {
+bool vsw_cli_handle_client(vswitch_state_t *vswitch, int client_sockfd) {
     char *cmd = NULL;
     char *out = NULL;
     size_t len;
@@ -165,7 +166,7 @@ bool vsw_cli_handle_client(vswitch_t *vswitch, int client_sockfd) {
 
 
 void *vsw_cli_serve(void *_vswitch) {
-    vswitch_t *vswitch = (vswitch_t *)_vswitch;
+    vswitch_state_t *vswitch = (vswitch_state_t *)_vswitch;
 
     const char *SOCK_PATH = "/tmp/vswsh.sock";
     int server_sockfd;

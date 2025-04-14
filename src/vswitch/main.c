@@ -57,7 +57,7 @@ int main() {
     pthread_mutex_init(&lock, NULL);
 
     // Group switch state data for passing into thread functions
-    vswitch_t vswitch = {
+    vswitch_state_t vswitch = {
         .sockfd = sockfd,
         .lock = &lock,
         .vports = vport_arr,

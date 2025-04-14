@@ -71,7 +71,7 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
 }
 
 void *vsw_cleanup(void * _vswitch) {
-    vswitch_t *vswitch = (vswitch_t *)_vswitch;
+    vswitch_state_t *vswitch = (vswitch_state_t *)_vswitch;
     int age;
     char log_buf[64];
     char addr_buf[INET_ADDRSTRLEN];

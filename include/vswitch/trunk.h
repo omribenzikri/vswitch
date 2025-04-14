@@ -40,18 +40,4 @@ returns a pointer to the struct, otherwise, returns NULL.
 */
 neighbor_t *vsw_search_neighbor(neighbor_t *neighbors, struct sockaddr_in *addr);
 
-/*
-Continuously sends JOIN requests to the given peer until its neighborship status is updated.
-The status is updated in the main application thread where all traffic is received and processed.
-If the maxmimum number of retries was exceeded and the neighborship is still in a pending status,
-the function deactivates the neighbor and sets its status accordingly.
-*/
-void vsw_conn_peer(int sockfd, neighbor_t *peer);
-
-/*
-Continuously sends heartbeats to active peers to let them know that the vswitch is still alive.
-This function is meant to run on a separate thread.
-*/
-void *vsw_send_peer_heartbeats(void *_vswitch);
-
 #endif
