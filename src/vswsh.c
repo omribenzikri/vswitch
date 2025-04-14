@@ -3,11 +3,15 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
 int main() {
     const char *SOCK_PATH = "/tmp/vswsh.sock";
+
+    // Ignore SIGPIPE signals
+    signal(SIGPIPE, SIG_IGN);
 
     // Set up Unix domain address
     struct sockaddr_un sock_addr = {
@@ -63,12 +67,15 @@ int main() {
             break;
         }
 
+        
+
         // Write command length to socket
         bytes_written = write(sockfd, &chars_read, sizeof(chars_read));
         if (bytes_written == -1) {
             perror("vswsh");
             return EXIT_FAILURE;
         }
+
         // Write command to socket
         bytes_written = write(sockfd, cmd, chars_read);
         if (bytes_written == -1) {
