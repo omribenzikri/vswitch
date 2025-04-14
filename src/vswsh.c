@@ -75,7 +75,7 @@ int main() {
         }
 
         // Write command to socket
-        bytes_written = write(sockfd, cmd, chars_read);
+        bytes_written = write(sockfd, cmd, chars_read * sizeof(char));
         if (bytes_written == -1) {
             perror("vswsh");
             return EXIT_FAILURE;
@@ -88,22 +88,21 @@ int main() {
             return EXIT_FAILURE;
         }
 
-        // Heap-allocate buffer for output
+        // Heap-allocate buffer for output, +1 for null terminator
         out = malloc((len + 1) * sizeof(char));
         if (out == NULL) {
             perror("vswsh");
             return EXIT_FAILURE;
         }
 
-        // Read output from the socket
+        // Read output from the socket and ensure null termination
         bytes_read = read(sockfd, out, len * sizeof(char));
         if (bytes_read == -1) {
             perror("vswsh");
             return EXIT_FAILURE;
         }
-
-        // Ensure null termination and print the output
         out[len] = '\0';
+        
         // Space out only multiline strings
         if (strchr(out, '\n') != NULL) {
             printf("\n%s\n", out);
