@@ -168,13 +168,17 @@ int main() {
                 assert(ether_frame_size > ETHER_HDR_LEN);
                 struct ether_header *hdr = (struct ether_header *)ether_frame;
 
-                log_message("RECEIVED TRAFFIC", LOG_DEBUG);
-
                 // Search for the interface by address
                 vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
                 if (src_vport == NULL) {
                     pthread_mutex_unlock(&lock);
                     continue;
+                }
+
+                for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+                    if (src_vport == &(vport_arr[i])) {
+                        printf("Received frame from interface Virt/%d\n", i + 1);
+                    }
                 }
 
                 // Add new MAC address table entry
@@ -191,6 +195,11 @@ int main() {
                         break;
                     case OPER_FORWARD:
                         vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
+                        for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+                            if (dst_entry->vport == &(vport_arr[i])) {
+                                printf("Forwarded frame trough interface Virt/%d\n", i + 1);
+                            }
+                        }
                         break;
                     default:
                         break;

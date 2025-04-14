@@ -31,13 +31,14 @@ oper_mode_t vsw_determine_oper_mode(entry_t *mac_addr_tbl, uint8_t *mac_addr, vp
 
 void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t *frame, ssize_t frame_size) {
     ssize_t bytes_sent;
-
+    
     // Flood the frame through all interfaces except the source
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
         // Skip flooding the traffic trough the source interface
         if (!vport_arr[i].used || &vport_arr[i] == src_vport) {
             continue;
         }
+        printf("Received frame from interface Virt/%d\n", i + 1);
         bytes_sent = sendto(
             sockfd,
             frame,
