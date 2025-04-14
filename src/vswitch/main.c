@@ -104,6 +104,7 @@ int main() {
         }
         assert(bytes_recvd > 0);
 
+        // ENTER CRITICAL SECTION - accessing shared vswitch data
         pthread_mutex_lock(&lock);
         uint8_t frame_type = *buf;
         switch (frame_type)
@@ -209,6 +210,7 @@ int main() {
                 break;
         }
         pthread_mutex_unlock(&lock);
+        // EXIT CRITICAL SECTION
     }
 
     // Close UDP sockets

@@ -30,11 +30,15 @@ bool vsw_cli_process_cmd(vswitch_t *vswitch, char *cmd, char **out) {
             return false;
         }
         else if (strcmp(tok, "macs") == 0) {
+            pthread_mutex_lock(vswitch->lock);
             vsw_mac_table_to_str(vswitch->mac_addr_tbl, out);
+            pthread_mutex_unlock(vswitch->lock);
             return true;
         }
         else if (strcmp(tok, "vports") == 0) {
+            pthread_mutex_lock(vswitch->lock);
             vsw_vport_table_to_str(vswitch->vports, out);
+            pthread_mutex_unlock(vswitch->lock);
             return true;
         }
         else {
@@ -60,12 +64,14 @@ bool vsw_cli_process_cmd(vswitch_t *vswitch, char *cmd, char **out) {
             },
             .sin_port = htons(VSW_UNDERLAY_PORT)
         };
+        pthread_mutex_lock(vswitch->lock);
         neighbor_t *new_neighbor = vsw_add_neighbor(vswitch->neighbors, &peer_addr);
         if (new_neighbor == NULL) {
             *out = VSW_MAX_PEERS_MSG;
             return false;
         }
-        vsw_conn_peer(vswitch->sockfd, new_neighbor);
+        pthread_mutex_unlock(vswitch->lock);
+        vsw_conn_peer(vswitch, new_neighbor);
         switch (new_neighbor->status) {
             case TRUNK_ESTABLISHED:
                 *out = VSW_CONN_OK_MSG;
@@ -125,7 +131,6 @@ bool vsw_cli_handle_client(vswitch_t *vswitch, int client_sockfd) {
     }
     cmd[len] = '\0';
 
-    // ENTER CRITICAL SECTION - accessing shared vswitch state data
     out_on_heap = vsw_cli_process_cmd(vswitch, cmd, &out);
 
     // Calculate the length of the output
