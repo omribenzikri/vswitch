@@ -67,8 +67,6 @@ int main() {
             break;
         }
 
-        
-
         // Write command length to socket
         bytes_written = write(sockfd, &chars_read, sizeof(chars_read));
         if (bytes_written == -1) {
