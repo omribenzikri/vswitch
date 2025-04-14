@@ -45,7 +45,6 @@ void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer) {
     ssize_t bytes_sent;
     
     for (int i = 0; i < VSW_JOIN_MAX_RETRIES; i++) {
-        pthread_mutex_lock(vswitch->lock);
         // Send a join request to the peer vswitch
         bytes_sent = sendto(
             vswitch->sockfd,
@@ -62,12 +61,10 @@ void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer) {
         // Update the neighborship status and wait
         peer->status = TRUNK_PENDING;
         last_req_time = time(NULL); 
-        pthread_mutex_unlock(vswitch->lock);
 
         // The response (if received) is handled in the main application thread.
         // Keep sending join requests if the the status of the neighborship doesn't change
         while (true) {
-            pthread_mutex_lock(vswitch->lock);
             // Check if response was received from the peer
             if (peer->status != TRUNK_PENDING) {
                 return;
@@ -76,14 +73,11 @@ void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer) {
             if (time(NULL) - last_req_time >= VSW_JOIN_RECV_TIMEOUT)  {
                 break;
             }
-            pthread_mutex_unlock(vswitch->lock);
         }
     }
-    pthread_mutex_lock(vswitch->lock);
     // No response received from peer vswitch after maximum retries
     peer->status = TRUNK_TIMEOUT;
     peer->used = false;
-    pthread_mutex_unlock(vswitch->lock);
 }
 
 
@@ -94,7 +88,6 @@ void *vsw_send_peer_heartbeats(void *_vswitch) {
 
     // Send heartbeats in an infinite loop
     while (true) {
-        pthread_mutex_lock(vswitch->lock);
         for (int i = 0; i < VSW_NEIGHBORS_ARR_SIZE; i++) {
             if (!vswitch->neighbors[i].used) {
                 continue;
@@ -112,7 +105,6 @@ void *vsw_send_peer_heartbeats(void *_vswitch) {
                 exit(EXIT_FAILURE);
             }
         }
-        pthread_mutex_unlock(vswitch->lock);
 
         // Sleep until the next heartbeat
         sleep(VSW_HEARTBEAT_INTERVAL);
