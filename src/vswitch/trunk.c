@@ -73,10 +73,12 @@ void vsw_conn_peer(vswitch_state_t *vswitch, neighbor_t *peer) {
             pthread_mutex_lock(vswitch->lock);
             // Check if response was received from the peer
             if (peer->status != TRUNK_PENDING) {
+                pthread_mutex_unlock(vswitch->lock);
                 return;
             }
             // No response from the peer yet and timeout expired - send another join request
             if (time(NULL) - last_req_time >= VSW_JOIN_RECV_TIMEOUT)  {
+                pthread_mutex_unlock(vswitch->lock);
                 break;
             }
             // EXIT CRITICAL SECTION
