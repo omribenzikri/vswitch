@@ -47,7 +47,7 @@ size_t vsw_mac_table_to_str(entry_t *tbl, char **buf) {
         }
 
         // Construct row
-        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%s      Virt/%-3d             %ld\n", mac_addr_buf, i + 1, time(NULL) - tbl[i].created);
+        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%-17s      Virt/%-3d             %ld\n", mac_addr_buf, i + 1, time(NULL) - tbl[i].created);
 
         // Allocate more memory if needed
         str_size += row_size;
