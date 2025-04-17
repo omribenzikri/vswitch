@@ -155,7 +155,6 @@ int main() {
                 }
                 break;
             case VSW_TUN_MSG_FREE:
-                printf("Received response from peer\n");
                 peer = vsw_search_neighbor(neighbors_arr, &vp_addr);
                 if (peer != NULL && peer->used) {
                     peer->status = TRUNK_ESTABLISHED;

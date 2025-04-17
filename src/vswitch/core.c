@@ -38,7 +38,7 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
         if (!vport_arr[i].used || &vport_arr[i] == src_vport) {
             continue;
         }
-        printf("Received frame from interface Virt/%d\n", i + 1);
+        printf("Flooded frame through interface Virt/%d\n", i + 1);
         bytes_sent = sendto(
             sockfd,
             frame,
