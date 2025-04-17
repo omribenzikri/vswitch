@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <arpa/inet.h>
+#include "vswitch/stats.h"
 
 #define VSW_VPORT_ARR_SIZE 24
 
@@ -13,13 +14,21 @@ typedef struct {
     bool used;
     time_t last_seen;
     struct sockaddr_in addr;
+    vport_stats_t stats;
 } vport_t;
 
 /*
-Generates a string representation of the vport able and stores it in a heap-allocated buffer.
+Generates a string representation of the vport table and stores it in a heap-allocated buffer.
 Returns the size of the string, not including the null terminator. The buffer should be freed at a later point.
 */
 size_t vsw_vport_table_to_str(vport_t *vports, char **buf);
+
+/*
+Generates a string representation of a vport table that displays interface statistics and stores it
+in a heap-allocated buffer. Returns the size of the string, not including the null terminator.
+The buffer should be freed at a later point.
+*/
+size_t vsw_vport_stats_table_to_str(vport_t *vports, char **);
 
 /*
 Adds a new virtual interface to the array of interfaces. If there is room for a new connection,
