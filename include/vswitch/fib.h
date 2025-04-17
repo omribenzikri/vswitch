@@ -23,7 +23,7 @@ typedef struct {
 Generates a string representation of the MAC address table and stores it in a heap-allocated buffer.
 Returns the size of the string, not including the null terminator. The buffer should be freed at a later point.
 */
-size_t vsw_mac_table_to_str(entry_t *tbl, char **buf);
+size_t vsw_mac_table_to_str(entry_t *tbl, vport_t *vports, char **buf);
 
 /*
 Adds a new entry to the MAC address table. If the table is full, the new entry

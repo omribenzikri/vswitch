@@ -3,6 +3,7 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
+#include <assert.h>
 #include <netinet/in.h>
 #include <netinet/ether.h>
 #include <net/ethernet.h>
@@ -10,7 +11,7 @@
 #include "vswitch/fib.h"
 
 
-size_t vsw_mac_table_to_str(entry_t *tbl, char **buf) {
+size_t vsw_mac_table_to_str(entry_t *tbl, vport_t *vports, char **buf) {
     const size_t OUT_BASE_SIZE = 1024;
     const size_t MAX_ROW_SIZE = 48;
     char heading[] = "MAC ADDR               VPORT                AGE\n==========================================================\n";
@@ -18,6 +19,7 @@ size_t vsw_mac_table_to_str(entry_t *tbl, char **buf) {
     size_t buf_size = OUT_BASE_SIZE;
     size_t str_size = 0;
     ssize_t row_size;
+    int vport_idx;
     char *mac_addr_buf;
     char ip_addr_buf[INET_ADDRSTRLEN];
     char row_buf[MAX_ROW_SIZE];
@@ -46,8 +48,17 @@ size_t vsw_mac_table_to_str(entry_t *tbl, char **buf) {
             exit(EXIT_FAILURE);
         }
 
+        // Find the source vport number
+        vport_idx = -1;
+        for (int j = 0; j < VSW_VPORT_ARR_SIZE; j++) {
+            if (tbl[i].vport == &(vports[j])) {
+                vport_idx = j;
+            }
+        }
+        assert(vport_idx != -1);
+
         // Construct row
-        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%-17s      Virt/%-3d             %ld\n", mac_addr_buf, i + 1, time(NULL) - tbl[i].created);
+        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%-17s      Virt/%-3d             %ld\n", mac_addr_buf, vport_idx + 1, time(NULL) - tbl[i].created);
 
         // Allocate more memory if needed
         str_size += row_size;

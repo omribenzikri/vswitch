@@ -33,7 +33,7 @@ bool vsw_cli_process_cmd(vswitch_state_t *vswitch, char *cmd, char **out) {
         else if (strcmp(tok, "macs") == 0) {
             // ENTER CRITICAL SECTION
             pthread_mutex_lock(vswitch->lock);
-            vsw_mac_table_to_str(vswitch->mac_addr_tbl, out);
+            vsw_mac_table_to_str(vswitch->mac_addr_tbl, vswitch->vports, out);
             // EXIT CRITICAL SECTION
             pthread_mutex_unlock(vswitch->lock);
             return true;
