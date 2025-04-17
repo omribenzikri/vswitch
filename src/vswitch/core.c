@@ -78,6 +78,8 @@ void *vsw_cleanup(void * _vswitch) {
 
     // Continously look for objects to clean up
     while (true) {
+        // ENTER CRITICAL SECTION
+        pthread_mutex_lock(vswitch->lock);
         for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
             if (!vswitch->mac_addr_tbl[i].used) {
                 continue;
@@ -106,5 +108,7 @@ void *vsw_cleanup(void * _vswitch) {
                 log_message(log_buf, LOG_INFO);
             }
         }
+        // EXIT CRITICAL SECTION
+        pthread_mutex_unlock(vswitch->lock);
     }
 }

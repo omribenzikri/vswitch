@@ -13,6 +13,7 @@ to thread functions
 */
 typedef struct {
     int sockfd;
+    pthread_mutex_t *lock;
     vport_t *vports;
     neighbor_t *neighbors;
     entry_t *mac_addr_tbl;

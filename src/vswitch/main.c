@@ -52,9 +52,14 @@ int main() {
     snprintf(log_buf, sizeof(log_buf), "Bound underlay UDP socket to port: %d", VSW_UNDERLAY_PORT);
     log_message(log_buf, LOG_INFO);
 
+    // Mutex lock used for thread synchronization
+    pthread_mutex_t lock;
+    pthread_mutex_init(&lock, NULL);
+
     // Group switch state data for passing into thread functions
     vswitch_state_t vswitch = {
         .sockfd = sockfd,
+        .lock = &lock,
         .vports = vport_arr,
         .neighbors = neighbors_arr,
         .mac_addr_tbl = mac_addr_tbl
@@ -99,6 +104,9 @@ int main() {
         }
         assert(bytes_recvd > 0);
 
+        // ENTER CRITICAL SECTION
+        pthread_mutex_lock(&lock);
+
         uint8_t frame_type = *buf;
         switch (frame_type)
         {
@@ -106,6 +114,7 @@ int main() {
                 // Heartbeat received - search for the vport by address
                 vport_t *vport = vsw_search_vport(vport_arr, &vp_addr);
                 if (vport == NULL) {
+                    pthread_mutex_unlock(&lock);
                     continue;
                 }
                 // Reset the last seen parameter
@@ -165,6 +174,7 @@ int main() {
                 // Search for the interface by address
                 vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
                 if (src_vport == NULL) {
+                    pthread_mutex_unlock(&lock);
                     continue;
                 }
 
@@ -201,7 +211,13 @@ int main() {
             default:
                 break;
         }
+
+        // EXIT CRITICAL SECTION
+        pthread_mutex_unlock(&lock);
     }
+
+    // Destroy lock
+    pthread_mutex_destroy(&lock);
 
     // Close UDP sockets
     close(sockfd);
