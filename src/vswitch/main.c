@@ -177,6 +177,10 @@ int main() {
                     continue;
                 }
 
+                // Update source interface statistics
+                src_vport->stats.rx_bytes += ether_frame_size;
+                src_vport->stats.rx_packets++;
+
                 // Add new MAC address table entry
                 vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, src_vport);
 
@@ -193,6 +197,7 @@ int main() {
                         vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
                         break;
                     default:
+                        src_vport->stats.drops++;
                         break;
                 }
                 break;

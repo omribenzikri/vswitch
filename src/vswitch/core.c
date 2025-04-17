@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <proto.h>
 #include "util/logging.h"
 #include "vswitch/core.h"
 
@@ -50,6 +51,9 @@ void vsw_flood_frame(int sockfd, vport_t *vport_arr, vport_t *src_vport, uint8_t
             log_sys_error();
             exit(EXIT_FAILURE);
         }
+        // Update destination interface statistics
+        vport_arr[i].stats.tx_bytes += frame_size - VSW_TUN_ENCAP_SIZE;
+        vport_arr[i].stats.tx_packets++;
     }
 }
 
@@ -67,6 +71,9 @@ void vsw_forward_frame(int sockfd, vport_t *vport, uint8_t *frame, ssize_t frame
         log_sys_error();
         exit(EXIT_FAILURE);
     }
+    // Update destination interface statistics
+    vport->stats.tx_bytes += frame_size - VSW_TUN_ENCAP_SIZE;
+    vport->stats.tx_packets++;
 }
 
 void *vsw_cleanup(void * _vswitch) {
