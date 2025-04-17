@@ -7,6 +7,33 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+void print_help() { 
+    const char *HELP_DIAG_HEADING = "Diagnostic commands:";
+    const char *HELP_CONF_HEADING = "Configuration commands:";
+
+    size_t diag_cmds_count = 3;
+    const char *diag_cmds[] = {
+        "show vports - show connected virtual interfaces",
+        "show macs - show MAC address table",
+        "show stats - show interface statistics"
+    };
+
+    size_t conf_cmds_count = 1;
+    const char *conf_cmds[] = {
+        "trunk [ADDR] - connect a virtual trunk link to a peer vswitch"
+    };
+
+    puts(HELP_DIAG_HEADING);
+    for (int i = 0; i < diag_cmds_count; i++) {
+        printf("  %s\n", diag_cmds[i]);
+    }
+    puts(HELP_CONF_HEADING);
+    for (int i = 0; i < conf_cmds_count; i++) {
+        printf("  %s\n", conf_cmds[i]);
+    }
+}
+
+
 int main() {
     const char *SOCK_PATH = "/tmp/vswsh.sock";
 
@@ -57,6 +84,14 @@ int main() {
 
         // Check for empty command
         if (chars_read <= 0) {
+            free(cmd);
+            cmd = NULL;
+            continue;
+        }
+
+        // Check for help command
+        if (strcmp(cmd, "help") == 0) {
+            print_help();
             free(cmd);
             cmd = NULL;
             continue;
