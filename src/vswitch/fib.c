@@ -13,7 +13,7 @@
 
 size_t vsw_mac_table_to_str(entry_t *tbl, vport_t *vports, char **buf) {
     const size_t OUT_BASE_SIZE = 1024;
-    const size_t MAX_ROW_SIZE = 48;
+    const size_t MAX_ROW_SIZE = 64;
     char heading[] = "MAC ADDR               VPORT                AGE\n==========================================================\n";
 
     size_t buf_size = OUT_BASE_SIZE;
