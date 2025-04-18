@@ -42,4 +42,10 @@ If found - returns a pointer to the struct, otherwise, returns NULL
 */
 vport_t *vsw_search_vport(vport_t *vports, struct sockaddr_in *vport_addr);
 
+/*
+Searches for a virtual interface in the interfaces array by socket pair.
+If found - returns the index of the element, otherwise, returns -1.
+*/
+int vsw_search_vport_idx(vport_t *vports, struct sockaddr_in *vport_addr);
+
 #endif

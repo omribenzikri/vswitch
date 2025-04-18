@@ -153,9 +153,25 @@ vport_t *vsw_add_vport(vport_t *vports, struct sockaddr_in *addr) {
 
 vport_t *vsw_search_vport(vport_t *vports, struct sockaddr_in *vport_addr) {
     for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+        if (!vports[i].used) {
+            continue;
+        }
         if (vport_addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && vport_addr->sin_port == vports[i].addr.sin_port) {
             return &vports[i];
         }
     }
     return NULL;
+}
+
+
+int vsw_search_vport_idx(vport_t *vports, struct sockaddr_in *vport_addr) {
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+        if (!vports[i].used) {
+            continue;
+        }
+        if (vport_addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && vport_addr->sin_port == vports[i].addr.sin_port) {
+            return i;
+        }
+    }
+    return -1;
 }
