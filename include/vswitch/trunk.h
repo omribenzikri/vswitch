@@ -29,6 +29,12 @@ typedef struct {
 } neighbor_t;
 
 /*
+Generates a string representation of the neighbors table and stores it in a heap-allocated buffer.
+Returns the size of the string, not including the null terminator. The buffer should be freed at a later point.
+*/
+size_t vsw_neighbor_table_to_str(neighbor_t *neighbors, vport_t *vports, char **buf);
+
+/*
 Adds a new neighbor to the array of neighbors. If there is room for a new neighbor,
 returns a pointer to the added struct, otherwise, returns NULL.
 */

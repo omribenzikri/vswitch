@@ -1,11 +1,83 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <time.h>
+#include <string.h>
 #include "proto.h"
 #include "util/logging.h"
 #include "vswitch/core.h"
 #include "vswitch/trunk.h"
+
+
+size_t vsw_neighbor_table_to_str(neighbor_t *neighbors, vport_t *vports, char **buf) {
+    const size_t OUT_BASE_SIZE = 1024;
+    const size_t MAX_ROW_SIZE = 64;
+    const size_t MAX_VPORT_NAME_SIZE = 16;
+    char heading[] = "UNDERLEY ADDRESS            BIODIRECTIONAL            LOCAL VPORT\n====================================================================\n";
+
+    size_t buf_size = OUT_BASE_SIZE;
+    size_t str_size = 0;
+    ssize_t row_size;
+    char addr_buf[INET_ADDRSTRLEN];
+    char row_buf[MAX_ROW_SIZE];
+
+    int neighbor_vport_idx;
+    char neighbor_vport_name[MAX_VPORT_NAME_SIZE];
+    bool neighborship_two_way;
+    
+    // Heap-allocate base buffer
+    char *tmp_buf = malloc(buf_size * sizeof(char));
+    if (tmp_buf == NULL) {
+        log_sys_error();
+        exit(EXIT_FAILURE); 
+    }
+
+    // Copy heading to the buffer
+    strcpy(tmp_buf, heading);
+    str_size += sizeof(heading);
+
+    for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+        if (!neighbors[i].used) {
+            continue;
+        }
+
+        // Convert socket IP address to string
+        if (inet_ntop(AF_INET, &neighbors[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
+            log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
+            exit(EXIT_FAILURE);
+        }
+
+        // Search for a local interface of neighbor
+        neighbor_vport_idx = vsw_search_vport_idx(vports, &neighbors[i].addr);
+        if (neighbor_vport_idx != -1) {
+            snprintf(neighbor_vport_name, MAX_VPORT_NAME_SIZE, "Virt/%d", neighbor_vport_idx);
+            neighborship_two_way = true;
+        } else {
+            strncpy(neighbor_vport_name, "N/A", MAX_VPORT_NAME_SIZE);
+            neighborship_two_way = false;
+        }
+
+        // Construct row
+        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%-28s%-26s%s\n", addr_buf, neighborship_two_way ? "yes" : "no", neighbor_vport_name);
+
+        // Allocate more memory if needed
+        str_size += row_size;
+        if (str_size >= buf_size) {
+            buf_size += OUT_BASE_SIZE;
+            tmp_buf = realloc(tmp_buf, buf_size * sizeof(char));
+            if (tmp_buf == NULL) {
+                log_sys_error();
+                exit(EXIT_FAILURE); 
+            }
+        }
+
+        // Concatenate new row (+1 for null terminator)
+        strncat(tmp_buf, row_buf, row_size + 1);
+    }
+    *buf = tmp_buf;
+    return str_size - 1;
+}
 
 
 neighbor_t *vsw_add_neighbor(neighbor_t *neighbors, struct sockaddr_in *addr) {
