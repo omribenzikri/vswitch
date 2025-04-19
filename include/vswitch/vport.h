@@ -5,47 +5,45 @@
 #include <arpa/inet.h>
 #include "vswitch/stats.h"
 
-#define VSW_VPORT_ARR_SIZE 24
-
 /*
-Represents a virtual interface
+Represents a virtual interface connection
 */
 typedef struct {
     bool used;
     time_t last_seen;
     struct sockaddr_in addr;
-    vport_stats_t stats;
-} vport_t;
+    vsw_vport_stats_t stats;
+} vsw_vport_t;
 
 /*
 Generates a string representation of the vport table and stores it in a heap-allocated buffer.
 Returns the size of the string, not including the null terminator. The buffer should be freed at a later point.
 */
-size_t vsw_vport_table_to_str(vport_t *vports, char **buf);
+size_t vsw_vport_table_to_str(vsw_vport_t *vports, char **buf);
 
 /*
 Generates a string representation of a vport table that displays interface statistics and stores it
 in a heap-allocated buffer. Returns the size of the string, not including the null terminator.
 The buffer should be freed at a later point.
 */
-size_t vsw_vport_stats_table_to_str(vport_t *vports, char **);
+size_t vsw_vport_stats_table_to_str(vsw_vport_t *vports, char **buf);
 
 /*
 Adds a new virtual interface to the array of interfaces. If there is room for a new connection,
-returns a pointer to the struct. Otherwise, returns NULL.
+returns a pointer to the struct, otherwise, returns NULL.
 */
-vport_t *vsw_add_vport(vport_t *vports, struct sockaddr_in *addr);
+vsw_vport_t *vsw_add_vport(vsw_vport_t *vports, struct sockaddr_in *addr);
 
 /*
 Searches for a virtual interface in the interfaces array by socket pair.
 If found - returns a pointer to the struct, otherwise, returns NULL
 */
-vport_t *vsw_search_vport(vport_t *vports, struct sockaddr_in *vport_addr);
+vsw_vport_t *vsw_search_vport(vsw_vport_t *vports, struct sockaddr_in *vport_addr);
 
 /*
 Searches for a virtual interface in the interfaces array by socket pair.
 If found - returns the index of the element, otherwise, returns -1.
 */
-int vsw_search_vport_idx(vport_t *vports, struct sockaddr_in *vport_addr);
+int vsw_search_vport_idx(vsw_vport_t *vports, struct sockaddr_in *vport_addr);
 
 #endif

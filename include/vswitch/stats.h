@@ -12,6 +12,6 @@ typedef struct {
     uint64_t tx_bytes;
     uint64_t tx_packets;
     uint64_t drops;
-} vport_stats_t;
+} vsw_vport_stats_t;
 
 #endif
