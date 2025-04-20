@@ -28,7 +28,7 @@ Looks up the given destination MAC in the table in order to find a matching entr
 If an entry was found, the provided entry pointer will be updated to point to the entry struct, otherwise,
 it will point to NULL. Returns the appropriate switching action (forward, flood, filter).
 */
-vsw_action_t vsw_determine_action(vsw_entry_t *mac_addr_tbl, uint8_t *mac_addr, vsw_vport_t *src_vport, vsw_entry_t **entry_ptr);
+vsw_action_t vsw_determine_switching_action(vsw_entry_t *mac_addr_tbl, uint8_t *mac_addr, vsw_vport_t *src_vport, vsw_entry_t **entry_ptr);
 
 /*
 Floods received ethernet frame through all connected interfaces, except for the source interface.
@@ -53,7 +53,7 @@ The status is updated in the main application thread where all traffic is receiv
 If the maxmimum number of retries was exceeded and the neighborship is still in a pending status,
 the function deactivates the neighbor and sets its status accordingly.
 */
-void vsw_conn_neighbor(vsw_state_t *vswitch, neighbor_t *peer);
+void vsw_connect_neighbor(vsw_state_t *vswitch, vsw_neighbor_t *peer);
 
 /*
 Continuously sends heartbeats to active peers to let them know that the vswitch is still alive.
