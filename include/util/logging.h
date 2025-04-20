@@ -17,7 +17,7 @@ typedef enum {
 /*
 Logs out a message to the screen, adds a newline on its own
 */
-void log_message(const char *message, log_severity_t severity);
+void log_message(char *message, log_severity_t severity);
 
 /*
 Logs out the most recent system error (indicated by the value of errno)
