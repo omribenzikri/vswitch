@@ -47,7 +47,9 @@ size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vpor
 
         // Find vport index
         vport_idx = vsw_search_vport_idx(vports, vport_count, &tbl[i].vport->addr);
-        assert(vport_idx != -1);
+        if (vport_idx == -1) {
+            continue;
+        }
 
         // Construct row
         row_len = snprintf(row_buf, MAX_ROW_LEN, "%-23sVirt/%-18d%ld\n", mac_addr_str, vport_idx + 1, time(NULL) - tbl[i].created);

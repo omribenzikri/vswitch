@@ -183,8 +183,8 @@ void *vsw_cleanup(void * _vswitch) {
                 continue;
             }
             age = time(NULL) - vswitch->mac_addr_tbl[i].created;
-            // Check if the entry is too old
-            if (age > VSW_MAC_ENTRY_MAX_AGE) {
+            // Check if the entry is too old, or if the vport it points to is no longer active
+            if (age > VSW_MAC_ENTRY_MAX_AGE || vsw_search_vport(vswitch->vports, VSW_VPORT_ARR_SIZE, &vswitch->vports[i].addr) == NULL) {
                 // Set entry to unused
                 vswitch->mac_addr_tbl[i].used = false;
             }
