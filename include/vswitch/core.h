@@ -4,7 +4,7 @@
 #include "vswitch/state.h"
 
 #define VSW_VPORT_ARR_SIZE 24
-#define VSW_NEIGHBORS_ARR_SIZE 4
+#define VSW_NEIGHBOR_ARR_SIZE 4
 #define VSW_MAC_ADDR_TBL_SIZE 32
 
 #define VSW_MAC_ENTRY_MAX_AGE 300

@@ -7,14 +7,40 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-void print_help() { 
+/*
+Intializes a Unix domain socket and connects to it, returns the opened file descriptor.
+If an error occurs, the function terminates the program, thus, it is guaranteed to return a valid file descriptor.
+*/
+int vswsh_sock_alloc(struct sockaddr_un *sock_addr) {
+    // Initialize Unix domain socket
+    int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("vswsh");
+        return EXIT_FAILURE;
+    }
+
+    // Connect to server
+    int ret = connect(sockfd, (struct sockaddr *)sock_addr, sizeof(struct sockaddr_un));
+    if (ret == -1) {
+        perror("vswsh");
+        return EXIT_FAILURE;
+    }
+    return sockfd;
+}
+
+
+/*
+Prints out the help menu, listing all available commands
+*/
+void vswsh_print_help() { 
     const char *HELP_DIAG_HEADING = "Diagnostic commands:";
     const char *HELP_CONF_HEADING = "Configuration commands:";
 
-    size_t diag_cmds_count = 3;
+    size_t diag_cmds_count = 4;
     const char *diag_cmds[] = {
         "show vports - show connected virtual interfaces",
         "show macs - show MAC address table",
+        "show neighbors - show peer vswitches",
         "show stats - show interface statistics"
     };
 
@@ -46,20 +72,9 @@ int main() {
     };
     strncpy(sock_addr.sun_path, SOCK_PATH, sizeof(sock_addr.sun_path));
 
-    // Initialize Unix domain socket
-    int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        perror("vswsh");
-        return EXIT_FAILURE;
-    }
+    // Initialize socket
+    int sockfd = vswsh_sock_alloc(&sock_addr);
 
-    // Connect to server
-    int ret = connect(sockfd, (struct sockaddr *)&sock_addr, sizeof(sock_addr));
-    if (ret == -1) {
-        perror("vswsh");
-        return EXIT_FAILURE;
-    }
-    
     // Buffer for storing the user command - heap allocated by getline() function 
     char *cmd = NULL;
     char *out = NULL;
@@ -91,7 +106,7 @@ int main() {
 
         // Check for help command
         if (strcmp(cmd, "help") == 0) {
-            print_help();
+            vswsh_print_help();
             free(cmd);
             cmd = NULL;
             continue;

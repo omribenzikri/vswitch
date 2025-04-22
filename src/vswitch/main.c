@@ -6,7 +6,6 @@
 #include "proto.h"
 #include "util/logging.h"
 #include "vswitch/core.h"
-#include "vswitch/trunk.h"
 #include "vswitch/cli.h"
 
 
@@ -14,19 +13,19 @@ int main() {
     char log_buf[128];
 
     // Set up the MAC address table
-    entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
+    vsw_entry_t mac_addr_tbl[VSW_MAC_ADDR_TBL_SIZE];
     memset(mac_addr_tbl, 0, sizeof(mac_addr_tbl));
     snprintf(log_buf, sizeof(log_buf), "Allocated MAC address table of size: %d", VSW_MAC_ADDR_TBL_SIZE);
     log_message(log_buf, LOG_INFO);
 
     // Set up the interface table
-    vport_t vport_arr[VSW_VPORT_ARR_SIZE];
+    vsw_vport_t vport_arr[VSW_VPORT_ARR_SIZE];
     memset(vport_arr, 0, sizeof(vport_arr));
     snprintf(log_buf, sizeof(log_buf), "Allocated %d virtual interfaces.", VSW_VPORT_ARR_SIZE);
     log_message(log_buf, LOG_INFO);
 
     // Set up neighbors array
-    neighbor_t neighbors_arr[VSW_NEIGHBORS_ARR_SIZE];
+    vsw_neighbor_t neighbors_arr[VSW_NEIGHBOR_ARR_SIZE];
     memset(neighbors_arr, 0, sizeof(neighbors_arr));
 
     // Set up vswitch UDP socket
@@ -54,16 +53,15 @@ int main() {
 
     // Mutex lock used for thread synchronization
     pthread_mutex_t lock;
-    pthread_mutex_init(&lock, NULL);
-
+    
     // Group switch state data for passing into thread functions
-    vswitch_state_t vswitch = {
+    vsw_state_t vswitch = {
         .sockfd = sockfd,
-        .lock = &lock,
         .vports = vport_arr,
         .neighbors = neighbors_arr,
         .mac_addr_tbl = mac_addr_tbl
     };
+    pthread_mutex_init(&vswitch.lock, NULL);
 
     // Start cleanup thread
     pthread_t cleanup_thread_pid;
@@ -79,14 +77,14 @@ int main() {
 
     // Start neighbor heartbeat thread
     pthread_t heartbeat_thread_pid;
-    pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_peer_heartbeats, &vswitch);
+    pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_neighbor_heartbeats, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started neighbor heartbeat thread.");
     log_message(log_buf, LOG_DEBUG);
 
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
-    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
-    neighbor_t *peer = NULL;
+    uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
+    vsw_neighbor_t *peer = NULL;
 
     while (true) {
         // Receive a frame from the socket
@@ -110,9 +108,9 @@ int main() {
         uint8_t frame_type = *buf;
         switch (frame_type)
         {
-            case VSW_TUN_MSG_HRTBT:
+            case VSW_CTRL_MSG_HEARTBEAT:
                 // Heartbeat received - search for the vport by address
-                vport_t *vport = vsw_search_vport(vport_arr, &vp_addr);
+                vsw_vport_t *vport = vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 if (vport == NULL) {
                     pthread_mutex_unlock(&lock);
                     continue;
@@ -120,11 +118,11 @@ int main() {
                 // Reset the last seen parameter
                 vport->last_seen = time(NULL); 
                 break;
-            case VSW_TUN_MSG_JOIN:
+            case VSW_CTRL_MSG_JOIN:
                 // Join message received - add a new virtual interface connection
-                vport_t *new_vport = vsw_add_vport(vport_arr, &vp_addr);
+                vsw_vport_t *new_vport = vsw_add_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 // Format an appropriate response
-                uint8_t response = new_vport == NULL ? VSW_TUN_MSG_FULL : VSW_TUN_MSG_FREE;
+                uint8_t response = new_vport == NULL ? VSW_CTRL_MSG_FULL : VSW_CTRL_MSG_FREE;
                 ssize_t bytes_sent = sendto(
                     sockfd,
                     &response,
@@ -148,30 +146,30 @@ int main() {
                     log_message(log_buf, LOG_INFO);
                 }
                 break;
-            case VSW_TUN_MSG_FULL:
-                peer = vsw_search_neighbor(neighbors_arr, &vp_addr);
+            case VSW_CTRL_MSG_FULL:
+                peer = vsw_search_neighbor(neighbors_arr, VSW_NEIGHBOR_ARR_SIZE, &vp_addr);
                 if (peer != NULL && peer->used) {
-                    peer->status = TRUNK_PEER_FULL;
+                    peer->status = VSW_TRUNK_PEER_FULL;
                 }
                 break;
-            case VSW_TUN_MSG_FREE:
-                peer = vsw_search_neighbor(neighbors_arr, &vp_addr);
+            case VSW_CTRL_MSG_FREE:
+                peer = vsw_search_neighbor(neighbors_arr, VSW_NEIGHBOR_ARR_SIZE, &vp_addr);
                 if (peer != NULL && peer->used) {
-                    peer->status = TRUNK_ESTABLISHED;
+                    peer->status = VSW_TRUNK_ESTABLISHED;
                 }
                 break;
-            case VSW_TUN_MSG_TRFC:
+            case VSW_CTRL_MSG_TRAFFIC:
                 
                 // Strip the custom tunnel header
-                uint8_t *ether_frame = buf + VSW_TUN_ENCAP_SIZE;
-                size_t ether_frame_size = bytes_recvd - VSW_TUN_ENCAP_SIZE;
+                uint8_t *ether_frame = buf + VSW_CTRL_HDR_SIZE;
+                size_t ether_frame_size = bytes_recvd - VSW_CTRL_HDR_SIZE;
                 
                 // Parse ethernet header
                 assert(ether_frame_size > ETHER_HDR_LEN);
                 struct ether_header *hdr = (struct ether_header *)ether_frame;
 
                 // Search for the interface by address
-                vport_t *src_vport = vsw_search_vport(vport_arr, &vp_addr);
+                vsw_vport_t *src_vport = vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 if (src_vport == NULL) {
                     pthread_mutex_unlock(&lock);
                     continue;
@@ -182,18 +180,18 @@ int main() {
                 src_vport->stats.rx_packets++;
 
                 // Add new MAC address table entry
-                vsw_add_mac_entry(mac_addr_tbl, hdr->ether_shost, src_vport);
+                vsw_add_mac_entry(mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, hdr->ether_shost, src_vport);
 
                 // Determine what to do with the frame
-                entry_t *dst_entry;
-                oper_mode_t mode = vsw_determine_oper_mode(mac_addr_tbl, hdr->ether_dhost, src_vport, &dst_entry);
+                vsw_entry_t *dst_entry;
+                vsw_action_t action = vsw_determine_switching_action(mac_addr_tbl, hdr->ether_dhost, src_vport, &dst_entry);
 
-                switch (mode)
+                switch (action)
                 {
-                    case OPER_FLOOD:
+                    case VSW_ACTION_FLOOD:
                         vsw_flood_frame(sockfd, vport_arr, src_vport, buf, bytes_recvd);
                         break;
-                    case OPER_FORWARD:
+                    case VSW_ACTION_FORWARD:
                         vsw_forward_frame(sockfd, dst_entry->vport, buf, bytes_recvd);
                         break;
                     default:

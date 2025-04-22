@@ -10,86 +10,78 @@
 #include "util/logging.h"
 #include "vswitch/fib.h"
 
-
-size_t vsw_mac_table_to_str(entry_t *tbl, vport_t *vports, char **buf) {
-    const size_t OUT_BASE_SIZE = 1024;
-    const size_t MAX_ROW_SIZE = 64;
-    char heading[] = "MAC ADDR               VPORT                AGE\n==========================================================\n";
+size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vports, size_t vport_count, char **buf) {
+    const size_t OUT_BASE_SIZE = 1024 * sizeof(char);
+    const size_t MAX_ROW_LEN = 64;
+    char *heading[] = {"MAC ADDR", "VPORT", "AGE"};
 
     size_t buf_size = OUT_BASE_SIZE;
-    size_t str_size = 0;
-    ssize_t row_size;
+    size_t out_len = 0;
+    ssize_t row_len;
     int vport_idx;
-    char *mac_addr_buf;
-    char ip_addr_buf[INET_ADDRSTRLEN];
-    char row_buf[MAX_ROW_SIZE];
+    char *mac_addr_str;
+    char row_buf[MAX_ROW_LEN];
     
     // Heap-allocate base buffer
-    char *tmp_buf = malloc(buf_size * sizeof(char));
+    char *tmp_buf = malloc(buf_size);
     if (tmp_buf == NULL) {
         log_sys_error();
         exit(EXIT_FAILURE); 
     }
 
     // Copy heading to the buffer
-    strcpy(tmp_buf, heading);
-    str_size += sizeof(heading);
+    out_len += snprintf(
+        tmp_buf,
+        buf_size,
+        "%-23s%-23s%s\n===================================================\n",
+        heading[0], heading[1], heading[2]
+    );
 
-    for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+    for (int i = 0; i < tbl_size; i++) {
         if (!tbl[i].used) {
             continue;
         }
+
         // Convert entry MAC address to string
-        mac_addr_buf = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
+        mac_addr_str = ether_ntoa((const struct ether_addr *)tbl[i].mac_addr);
 
-        // Convert socket IP address to string
-        if (inet_ntop(AF_INET, &tbl[i].vport->addr.sin_addr, ip_addr_buf, sizeof(ip_addr_buf)) == NULL) {
-            log_message("Failed to stringify vport IP address.", LOG_CRITICAL);
-            exit(EXIT_FAILURE);
-        }
-
-        // Find the source vport number
-        vport_idx = -1;
-        for (int j = 0; j < VSW_VPORT_ARR_SIZE; j++) {
-            if (tbl[i].vport == &(vports[j])) {
-                vport_idx = j;
-            }
-        }
+        // Find vport index
+        vport_idx = vsw_search_vport_idx(vports, vport_count, &tbl[i].vport->addr);
         assert(vport_idx != -1);
 
         // Construct row
-        row_size = snprintf(row_buf, MAX_ROW_SIZE, "%-17s      Virt/%-3d             %ld\n", mac_addr_buf, vport_idx + 1, time(NULL) - tbl[i].created);
+        row_len = snprintf(row_buf, MAX_ROW_LEN, "%-23sVirt/%-18d%ld\n", mac_addr_str, vport_idx + 1, time(NULL) - tbl[i].created);
 
         // Allocate more memory if needed
-        str_size += row_size;
-        if (str_size >= buf_size) {
+        out_len += row_len;
+        if (out_len * sizeof(char) >= buf_size) {
             buf_size += OUT_BASE_SIZE;
-            tmp_buf = realloc(tmp_buf, buf_size * sizeof(char));
+            tmp_buf = realloc(tmp_buf, buf_size);
             if (tmp_buf == NULL) {
                 log_sys_error();
                 exit(EXIT_FAILURE); 
             }
         }
 
-        // Concatenate new row (+1 for null terminator)
-        strncat(tmp_buf, row_buf, row_size + 1);
+        // Concatenate new row
+        strncat(tmp_buf, row_buf, row_len);
     }
     *buf = tmp_buf;
-    return str_size - 1;
+    return out_len;
 }
 
 
-void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
+void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw_vport_t *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
-    entry_t new = {
+    vsw_entry_t new = {
         .used = true,
         .vport = vport,
         .created = time(NULL)
     };
     memcpy(new.mac_addr, mac_addr, ETHER_ADDR_LEN);
 
-    for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+    for (int i = 0; i < tbl_size; i++) {
         // If an entry for this MAC addres already exists, just return
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
             return;
@@ -109,8 +101,8 @@ void vsw_add_mac_entry(entry_t *tbl, uint8_t *mac_addr, vport_t *vport) {
     tbl[old_idx] = new;
 }
 
-entry_t *vsw_search_mac_entry(entry_t *tbl, uint8_t *mac_addr) {
-    for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+vsw_entry_t *vsw_search_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr) {
+    for (int i = 0; i < tbl_size; i++) {
         if (!tbl[i].used) {
             continue;
         }

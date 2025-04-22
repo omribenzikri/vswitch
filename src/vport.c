@@ -60,7 +60,7 @@ until a response is received from the vswitch. If a response was received, it is
 otherwise, -1 returned.
 */
 int vp_conn_vswitch(const vport_t *vport) {
-    uint8_t req = VSW_TUN_MSG_JOIN;
+    uint8_t req = VSW_CTRL_MSG_JOIN;
     uint8_t res;
     ssize_t bytes_recvd;
     ssize_t bytes_sent;
@@ -140,7 +140,7 @@ is still alive.
 */
 void *vp_send_heartbeats(void *_vport) {
     const vport_t *vport = (const vport_t *)_vport;
-    uint8_t msg = VSW_TUN_MSG_HRTBT;
+    uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
 
     // Send heartbeats in an infinite loop
@@ -170,19 +170,19 @@ void *vp_forward_data_to_vswitch(void *_vport) {
     const vport_t *vport = (const vport_t *)_vport;
 
     // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
-    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
+    uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
     ssize_t ether_bytes_read;
 
     // Set message type to regular traffic
-    buf[0] = VSW_TUN_MSG_TRFC;
+    buf[0] = VSW_CTRL_MSG_TRAFFIC;
     ssize_t bytes_sent;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
         ether_bytes_read = read(
             vport->tapfd,
-            buf + VSW_TUN_ENCAP_SIZE,
-            sizeof(buf) - VSW_TUN_ENCAP_SIZE
+            buf + VSW_CTRL_HDR_SIZE,
+            sizeof(buf) - VSW_CTRL_HDR_SIZE
         );
         if (ether_bytes_read == -1) {
             log_sys_error();
@@ -197,7 +197,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
         bytes_sent = sendto(
             vport->sockfd,
             buf,
-            ether_bytes_read + VSW_TUN_ENCAP_SIZE,
+            ether_bytes_read + VSW_CTRL_HDR_SIZE,
             0,
             (struct sockaddr *)&vport->vsw_addr,
             sizeof(vport->vsw_addr)
@@ -217,7 +217,7 @@ void *vp_forward_data_to_tap(void *_vport) {
     const vport_t *vport = (const vport_t *)_vport;
 
     // Buffer for storing received ethernet frames
-    uint8_t buf[ETHER_MAX_LEN + VSW_TUN_ENCAP_SIZE];
+    uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
     ssize_t ether_bytes_written;
     ssize_t bytes_recvd;
     socklen_t vsw_addr_size;
@@ -237,12 +237,12 @@ void *vp_forward_data_to_tap(void *_vport) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        assert(bytes_recvd > ETHER_HDR_LEN + VSW_TUN_ENCAP_SIZE);
+        assert(bytes_recvd > ETHER_HDR_LEN + VSW_CTRL_HDR_SIZE);
         // Write the frame to the TAP
         ether_bytes_written = write(
             vport->tapfd,
-            buf + VSW_TUN_ENCAP_SIZE,
-            bytes_recvd - VSW_TUN_ENCAP_SIZE
+            buf + VSW_CTRL_HDR_SIZE,
+            bytes_recvd - VSW_CTRL_HDR_SIZE
         );
         if (ether_bytes_written == -1) {
             log_sys_error();
@@ -290,7 +290,7 @@ int main(int argc, char **argv) {
             log_message("Connection to vswitch timed-out.", LOG_ERROR);
             exit(EXIT_FAILURE);
             break;
-        case VSW_TUN_MSG_FULL:
+        case VSW_CTRL_MSG_FULL:
             log_message("Cannot connect to vswitch since it is full.", LOG_ERROR);
             exit(EXIT_FAILURE);
             break;

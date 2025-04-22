@@ -7,6 +7,8 @@
 #include "vswitch/core.h"
 #include "vswitch/cli.h"
 
+char *ARG_DELIM = " \r\n\t\a";
+
 char *VSW_BAD_CMD_MSG  = "Unrecognized command.";
 char *VSW_BAD_OBJ_MSG  = "Unrecognized object.";
 char *VSW_BAD_ARGS_MSG  = "Incorrect number of arguments passed.";
@@ -17,112 +19,115 @@ char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
 
 
-bool vsw_cli_process_cmd(vswitch_state_t *vswitch, char *cmd, char **out) {
-    // Tokenize command
-    const char *ARG_DELIM = " \r\n\t\a";
-    char *tok = strtok(cmd, ARG_DELIM);
-    if (tok == NULL) {
+bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
+    // Parse command for desired object
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+        *out = VSW_BAD_ARGS_MSG;
         return false;
     }
-    else if (strcmp(tok, "show") == 0) {
-        tok = strtok(NULL, ARG_DELIM);
-        if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
-            *out = VSW_BAD_ARGS_MSG;
-            return false;
-        }
-        else if (strcmp(tok, "macs") == 0) {
-            // ENTER CRITICAL SECTION
-            pthread_mutex_lock(vswitch->lock);
-            vsw_mac_table_to_str(vswitch->mac_addr_tbl, vswitch->vports, out);
-            // EXIT CRITICAL SECTION
-            pthread_mutex_unlock(vswitch->lock);
-            return true;
-        }
-        else if (strcmp(tok, "vports") == 0) {
-            // ENTER CRITICAL SECTION
-            pthread_mutex_lock(vswitch->lock);
-            vsw_vport_table_to_str(vswitch->vports, out);
-            // EXIT CRITICAL SECTION
-            pthread_mutex_unlock(vswitch->lock);
-            return true;
-        }
-        else if (strcmp(tok, "neighbors") == 0) {
-            // ENTER CRITICAL SECTION
-            pthread_mutex_lock(vswitch->lock);
-            vsw_neighbor_table_to_str(vswitch->neighbors, vswitch->vports, out);
-            // EXIT CRITICAL SECTION
-            pthread_mutex_unlock(vswitch->lock);
-            return true;
-        }
-        else if (strcmp(tok, "stats") == 0) {
-            // ENTER CRITICAL SECTION
-            pthread_mutex_lock(vswitch->lock);
-            vsw_vport_stats_table_to_str(vswitch->vports, out);
-            // EXIT CRITICAL SECTION
-            pthread_mutex_unlock(vswitch->lock);
-            return true;      
-        }
-        else {
-            *out = VSW_BAD_OBJ_MSG;
-            return false;
-        }
+    else if (strcmp(tok, "macs") == 0) {
+        vsw_mac_table_to_str(vswitch->mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
     }
-    else if (strcmp(tok, "trunk") == 0) {
-        tok = strtok(NULL, ARG_DELIM);
-        if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
-            *out = VSW_BAD_ARGS_MSG;
-            return false;
-        }
-        in_addr_t addr = inet_addr(tok);
-        if (addr == -1) {
-            *out = VSW_BAD_ADDR_MSG;
-            return false;
-        }
-        struct sockaddr_in peer_addr = {
-            .sin_family = AF_INET,
-            .sin_addr = {
-                .s_addr = addr
-            },
-            .sin_port = htons(VSW_UNDERLAY_PORT)
-        };
-        // ENTER CRITICAL SECTION
-        pthread_mutex_lock(vswitch->lock);
-        neighbor_t *new_neighbor = vsw_add_neighbor(vswitch->neighbors, &peer_addr);
-        // EXIT CRITICAL SECTION
-        pthread_mutex_unlock(vswitch->lock);
-        if (new_neighbor == NULL) {
-            *out = VSW_MAX_PEERS_MSG;
-            return false;
-        }
-        vsw_conn_peer(vswitch, new_neighbor);
-        // ENTER CRITICAL SECTION
-        pthread_mutex_lock(vswitch->lock);
-        switch (new_neighbor->status)
-        {
-            case TRUNK_ESTABLISHED:
-                *out = VSW_CONN_OK_MSG;
-                break;
-            case TRUNK_PEER_FULL:
-                *out = VSW_CONN_FULL_MSG;
-                break;
-            case TRUNK_TIMEOUT:
-                *out = VSW_CONN_TIMEOUT_MSG;
-                break;
-            default:
-                break;
-        }
-        // EXIT CRITICAL SECTION
-        pthread_mutex_unlock(vswitch->lock);
-        return false;
+    else if (strcmp(tok, "vports") == 0) {
+        vsw_vport_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
     }
-else {
-        *out = VSW_BAD_CMD_MSG;
+    else if (strcmp(tok, "neighbors") == 0) {
+        vsw_neighbor_table_to_str(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
+    }
+    else if (strcmp(tok, "stats") == 0) {
+        vsw_vport_stats_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;      
+    }
+    else {
+        *out = VSW_BAD_OBJ_MSG;
         return false;
     }
 }
 
 
-bool vsw_cli_handle_client(vswitch_state_t *vswitch, int client_sockfd) {
+void vsw_cli_process_trunk_cmd(vsw_state_t *vswitch, char **out) {
+    // Parse command for peer address
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+        *out = VSW_BAD_ARGS_MSG;
+        return;
+    }
+    in_addr_t addr = inet_addr(tok);
+    if (addr == -1) {
+        *out = VSW_BAD_ADDR_MSG;
+        return;
+    }
+    struct sockaddr_in peer_addr = {
+        .sin_family = AF_INET,
+        .sin_addr = {
+            .s_addr = addr
+        },
+        .sin_port = htons(VSW_UNDERLAY_PORT)
+    };
+    // ENTER CRITICAL SECTION
+    pthread_mutex_lock(&vswitch->lock);
+    vsw_neighbor_t *new_neighbor = vsw_add_neighbor(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, &peer_addr);
+    if (new_neighbor == NULL) {
+        *out = VSW_MAX_PEERS_MSG;
+        pthread_mutex_unlock(&vswitch->lock);
+        return;
+    }
+    // EXIT CRITICAL SECTION
+    pthread_mutex_unlock(&vswitch->lock);
+
+    // Attempt to connect to peer
+    vsw_connect_neighbor(vswitch, new_neighbor);
+
+    // ENTER CRITICAL SECTION
+    pthread_mutex_lock(&vswitch->lock);
+    switch (new_neighbor->status)
+    {
+        case VSW_TRUNK_ESTABLISHED:
+            *out = VSW_CONN_OK_MSG;
+            break;
+        case VSW_TRUNK_PEER_FULL:
+            *out = VSW_CONN_FULL_MSG;
+            break;
+        case VSW_TRUNK_TIMEOUT:
+            *out = VSW_CONN_TIMEOUT_MSG;
+            break;
+        default:
+            break;
+    }
+    // EXIT CRITICAL SECTION
+    pthread_mutex_unlock(&vswitch->lock);
+}
+
+
+bool vsw_cli_process_cmd(vsw_state_t *vswitch, char *cmd, char **out) {
+    bool out_on_heap = false;
+    
+    char *tok = strtok(cmd, ARG_DELIM);
+    if (tok == NULL) {
+        *out = VSW_BAD_CMD_MSG;
+    }
+    else if (strcmp(tok, "show") == 0) {
+        // ENTER CRITICAL SECTION
+        pthread_mutex_lock(&vswitch->lock);
+        out_on_heap = vsw_cli_process_diag_cmd(vswitch, out);
+        // EXIT CRITICAL SECTION
+        pthread_mutex_unlock(&vswitch->lock);
+    }
+    else if (strcmp(tok, "trunk") == 0) {
+        vsw_cli_process_trunk_cmd(vswitch, out);
+    }
+    else {
+        *out = VSW_BAD_CMD_MSG;
+    }
+    return out_on_heap;
+}
+
+
+bool vsw_cli_handle_client(vsw_state_t *vswitch, int client_sockfd) {
     char *cmd = NULL;
     char *out = NULL;
     size_t len;
@@ -193,13 +198,13 @@ bool vsw_cli_handle_client(vswitch_state_t *vswitch, int client_sockfd) {
 
 
 void *vsw_cli_serve(void *_vswitch) {
-    vswitch_state_t *vswitch = (vswitch_state_t *)_vswitch;
+    vsw_state_t *vswitch = (vsw_state_t *)_vswitch;
 
     const char *SOCK_PATH = "/tmp/vswsh.sock";
     int server_sockfd;
     int client_sockfd;
     int ret;
-    bool session_active = true;
+    bool session_active = false;
 
     // Delete previously allocated socket
     unlink(SOCK_PATH);
@@ -238,6 +243,7 @@ void *vsw_cli_serve(void *_vswitch) {
             exit(EXIT_FAILURE);
         }
         log_message("Local shell connected.", LOG_INFO);
+        session_active = true;
 
         while (session_active) {
             session_active = vsw_cli_handle_client(vswitch, client_sockfd);
