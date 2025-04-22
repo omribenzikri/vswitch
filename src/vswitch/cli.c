@@ -18,7 +18,10 @@ char *VSW_CONN_OK_MSG  = "Successfully connected to neighbor vswitch.";
 char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available vports on the peer.";
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
 
-
+/*
+Process a diagnostics command (e.g 'show' command). The output of the command will get pointed to by
+'out' and the return value indicates whether the output is allocated on the heap or not.
+*/
 bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
     // Parse command for desired object
     char *tok = strtok(NULL, ARG_DELIM);
@@ -48,7 +51,10 @@ bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
     }
 }
 
-
+/*
+Process trunk connection command. The output of the command will get pointed to by
+'out' and the return value indicates whether the output is allocated on the heap or not.
+*/
 void vsw_cli_process_trunk_cmd(vsw_state_t *vswitch, char **out) {
     // Parse command for peer address
     char *tok = strtok(NULL, ARG_DELIM);
@@ -102,7 +108,11 @@ void vsw_cli_process_trunk_cmd(vsw_state_t *vswitch, char **out) {
     pthread_mutex_unlock(&vswitch->lock);
 }
 
-
+/*
+Process the CLI command pointed to by 'cmd'. The output string will get pointed to by
+'out'. The return value indicates whether the data pointed to by 'out' is allocated on the heap,
+(in which case it should be freed later) or in static memory.
+*/
 bool vsw_cli_process_cmd(vsw_state_t *vswitch, char *cmd, char **out) {
     bool out_on_heap = false;
     
@@ -126,7 +136,10 @@ bool vsw_cli_process_cmd(vsw_state_t *vswitch, char *cmd, char **out) {
     return out_on_heap;
 }
 
-
+/*
+Receives and processes a command from the connected client at 'client_sockfd'. If needed, sends
+a response back to that client. The return value indicates whether the connection is still active or not.
+*/
 bool vsw_cli_handle_client(vsw_state_t *vswitch, int client_sockfd) {
     char *cmd = NULL;
     char *out = NULL;
@@ -196,7 +209,9 @@ bool vsw_cli_handle_client(vsw_state_t *vswitch, int client_sockfd) {
     return true;
 }
 
-
+/*
+Documented in header file
+*/
 void *vsw_cli_serve(void *_vswitch) {
     vsw_state_t *vswitch = (vsw_state_t *)_vswitch;
 
