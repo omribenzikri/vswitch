@@ -12,7 +12,7 @@ gcc -c -Wall -Werror -Iinclude -o tmp/util/logging.o src/util/logging.c
 gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/core.o src/vswitch/core.c
 gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/fib.o src/vswitch/fib.c
 gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/vport.o src/vswitch/vport.c
-gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/trunk.o src/vswitch/trunk.c
+gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/neighbor.o src/vswitch/neighbor.c
 gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/cli.o src/vswitch/cli.c
 gcc -c -Wall -Werror -Iinclude -o tmp/vswitch/main.o src/vswitch/main.c
 
@@ -25,7 +25,7 @@ gcc -o bin/vswitch \
     tmp/vswitch/core.o \
     tmp/vswitch/fib.o \
     tmp/vswitch/vport.o \
-    tmp/vswitch/trunk.o \
+    tmp/vswitch/neighbor.o \
     tmp/vswitch/cli.o \
     tmp/vswitch/main.o
 
