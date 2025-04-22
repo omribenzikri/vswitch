@@ -16,14 +16,14 @@ int vswsh_sock_alloc(struct sockaddr_un *sock_addr) {
     int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("vswsh");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
 
     // Connect to server
     int ret = connect(sockfd, (struct sockaddr *)sock_addr, sizeof(struct sockaddr_un));
     if (ret == -1) {
         perror("vswsh");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
     return sockfd;
 }
