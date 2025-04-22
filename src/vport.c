@@ -12,7 +12,6 @@
 #include <linux/if_tun.h>
 #include <netinet/in.h>
 #include <net/ethernet.h>
-#include <assert.h>
 #include <stdbool.h>
 #include <pthread.h>
 #include "proto.h"
@@ -188,10 +187,9 @@ void *vp_forward_data_to_vswitch(void *_vport) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        else if (ether_bytes_read == 0) {
+        else if (ether_bytes_read <= ETHER_ADDR_LEN) {
             continue;
         }
-        assert(ether_bytes_read > ETHER_ADDR_LEN);
     
         // Forward the frame through the socket
         bytes_sent = sendto(
@@ -224,7 +222,6 @@ void *vp_forward_data_to_tap(void *_vport) {
 
     while (true) {
         // Receive a frame from the socket
-        
         bytes_recvd = recvfrom(
             vport->sockfd,
             buf,
@@ -237,7 +234,9 @@ void *vp_forward_data_to_tap(void *_vport) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        assert(bytes_recvd > ETHER_HDR_LEN + VSW_CTRL_HDR_SIZE);
+        else if (bytes_recvd <= ETHER_HDR_LEN + VSW_CTRL_HDR_SIZE) {
+            continue;
+        }
         // Write the frame to the TAP
         ether_bytes_written = write(
             vport->tapfd,

@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <assert.h>
 #include <unistd.h>
 #include "proto.h"
 #include "util/logging.h"
@@ -100,7 +99,9 @@ int main() {
             log_sys_error();
             return EXIT_FAILURE;
         }
-        assert(bytes_recvd > 0);
+        else if (bytes_recvd == 0) {
+            continue;
+        }
 
         // ENTER CRITICAL SECTION
         pthread_mutex_lock(&lock);
@@ -165,7 +166,10 @@ int main() {
                 size_t ether_frame_size = bytes_recvd - VSW_CTRL_HDR_SIZE;
                 
                 // Parse ethernet header
-                assert(ether_frame_size > ETHER_HDR_LEN);
+                if (ether_frame_size <= ETHER_HDR_LEN) {
+                    pthread_mutex_unlock(&lock);
+                    continue;
+                }
                 struct ether_header *hdr = (struct ether_header *)ether_frame;
 
                 // Search for the interface by address

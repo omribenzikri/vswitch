@@ -3,7 +3,6 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
-#include <assert.h>
 #include <netinet/in.h>
 #include <netinet/ether.h>
 #include <net/ethernet.h>
