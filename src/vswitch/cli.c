@@ -19,43 +19,10 @@ char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
 
 /*
-Process a diagnostics command (e.g 'show' command). The output of the command will get pointed to by
-'out' and the return value indicates whether the output is allocated on the heap or not.
-*/
-bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
-    // Parse command for desired object
-    char *tok = strtok(NULL, ARG_DELIM);
-    if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
-        *out = VSW_BAD_ARGS_MSG;
-        return false;
-    }
-    else if (strcmp(tok, "macs") == 0) {
-        vsw_mac_table_to_str(vswitch->mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
-        return true;
-    }
-    else if (strcmp(tok, "vports") == 0) {
-        vsw_vport_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
-        return true;
-    }
-    else if (strcmp(tok, "neighbors") == 0) {
-        vsw_neighbor_table_to_str(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
-        return true;
-    }
-    else if (strcmp(tok, "stats") == 0) {
-        vsw_vport_stats_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
-        return true;      
-    }
-    else {
-        *out = VSW_BAD_OBJ_MSG;
-        return false;
-    }
-}
-
-/*
 Process trunk connection command. The output of the command will get pointed to by
-'out' and the return value indicates whether the output is allocated on the heap or not.
+'out'.
 */
-void vsw_cli_process_trunk_cmd(vsw_state_t *vswitch, char **out) {
+void vsw_cli_process_add_trunk_cmd(vsw_state_t *vswitch, char **out) {
     // Parse command for peer address
     char *tok = strtok(NULL, ARG_DELIM);
     if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
@@ -109,6 +76,64 @@ void vsw_cli_process_trunk_cmd(vsw_state_t *vswitch, char **out) {
 }
 
 /*
+Process a diagnostics command (e.g 'show' command). The output of the command will get pointed to by
+'out' and the return value indicates whether the output is allocated on the heap or not.
+*/
+bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
+    // Parse command for desired object
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+        *out = VSW_BAD_ARGS_MSG;
+        return false;
+    }
+    else if (strcmp(tok, "macs") == 0) {
+        vsw_mac_table_to_str(vswitch->mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
+    }
+    else if (strcmp(tok, "vports") == 0) {
+        vsw_vport_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
+    }
+    else if (strcmp(tok, "neighbors") == 0) {
+        vsw_neighbor_table_to_str(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;
+    }
+    else if (strcmp(tok, "stats") == 0) {
+        vsw_vport_stats_table_to_str(vswitch->vports, VSW_VPORT_ARR_SIZE, out);
+        return true;      
+    }
+    else {
+        *out = VSW_BAD_OBJ_MSG;
+        return false;
+    }
+}
+
+/*
+Process a configuration addition command (e.g 'add' command).
+The output of the command will get pointed to by 'out'.
+*/
+void vsw_cli_process_add_cmd(vsw_state_t *vswitch, char **out) {
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL) {
+        *out = VSW_BAD_ARGS_MSG;
+    }
+    else if (strcmp(tok, "trunk") == 0) {
+        vsw_cli_process_add_trunk_cmd(vswitch, out);
+    }
+    else {
+        *out = VSW_BAD_OBJ_MSG;
+    }
+}
+
+/*
+Process a configuration removal command (e.g 'remove' command).
+The output of the command will get pointed to by 'out'.
+*/
+void vsw_cli_process_rm_cmd(vsw_state_t *vswitch, char **out) {
+
+}
+
+/*
 Process the CLI command pointed to by 'cmd'. The output string will get pointed to by
 'out'. The return value indicates whether the data pointed to by 'out' is allocated on the heap,
 (in which case it should be freed later) or in static memory.
@@ -127,8 +152,11 @@ bool vsw_cli_process_cmd(vsw_state_t *vswitch, char *cmd, char **out) {
         // EXIT CRITICAL SECTION
         pthread_mutex_unlock(&vswitch->lock);
     }
-    else if (strcmp(tok, "trunk") == 0) {
-        vsw_cli_process_trunk_cmd(vswitch, out);
+    else if (strcmp(tok, "add") == 0) {
+        vsw_cli_process_add_cmd(vswitch, out);
+    }
+    else if (strcmp(tok, "remove") == 0) {
+        vsw_cli_process_rm_cmd(vswitch, out);
     }
     else {
         *out = VSW_BAD_CMD_MSG;
