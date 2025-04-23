@@ -17,8 +17,8 @@ char *VSW_MAX_PEERS_MSG  = "Failed to connect to peer vswitch - all local peer s
 char *VSW_CONN_OK_MSG  = "Successfully connected to neighbor vswitch.";
 char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available vports on the peer.";
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
-char *VSW_RM_PEER_OK_MSG = "Sucessfully disconnected from the neighbor.";
-char *VSW_RM_PEER_NOT_FOUND_MSG = "Failed to remove the neighbor - neighbor not found.";
+char *VSW_RM_PEER_OK_MSG = "Sucessfully removed the neighbor vswitch";
+char *VSW_RM_PEER_NOT_FOUND_MSG = "Failed to remove the neighbor vswitch - neighbor not found.";
 
 /*
 Process trunk connection command. The output of the command will get pointed to by
