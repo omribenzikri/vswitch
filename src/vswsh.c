@@ -46,7 +46,7 @@ void vswsh_print_help() {
 
     size_t conf_cmds_count = 2;
     const char *conf_cmds[] = {
-        "add trunk  [ADDR] - connect a virtual trunk link to a peer vswitch",
+        "add trunk [ADDR] - connect a virtual trunk link to a peer vswitch",
         "remove trunk [ADDR] - disconnect a virtual trunk link to a peer vswitch"
     };
 
