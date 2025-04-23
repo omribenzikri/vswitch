@@ -17,6 +17,8 @@ char *VSW_MAX_PEERS_MSG  = "Failed to connect to peer vswitch - all local peer s
 char *VSW_CONN_OK_MSG  = "Successfully connected to neighbor vswitch.";
 char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available vports on the peer.";
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
+char *VSW_RM_PEER_OK_MSG = "Sucessfully disconnected from the neighbor.";
+char *VSW_RM_PEER_NOT_FOUND_MSG = "Failed to remove the neighbor - neighbor not found.";
 
 /*
 Process trunk connection command. The output of the command will get pointed to by
@@ -70,6 +72,42 @@ void vsw_cli_process_add_trunk_cmd(vsw_state_t *vswitch, char **out) {
             break;
         default:
             break;
+    }
+    // EXIT CRITICAL SECTION
+    pthread_mutex_unlock(&vswitch->lock);
+}
+
+/*
+Process trunk removal command. The output of the command will get pointed to by
+'out'.
+*/
+void vsw_cli_process_rm_trunk_cmd(vsw_state_t *vswitch, char **out) {
+    // Parse command for peer address
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
+        *out = VSW_BAD_ARGS_MSG;
+        return;
+    }
+    in_addr_t addr = inet_addr(tok);
+    if (addr == ( in_addr_t)(-1)) {
+        *out = VSW_BAD_ADDR_MSG;
+        return;
+    }
+    struct sockaddr_in peer_addr = {
+        .sin_family = AF_INET,
+        .sin_addr = {
+            .s_addr = addr
+        },
+        .sin_port = htons(VSW_UNDERLAY_PORT)
+    };
+
+    // ENTER CRITICAL SECTION
+    pthread_mutex_lock(&vswitch->lock);
+    vsw_neighbor_t *popped_neighbor = vsw_remove_neighbor(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, &peer_addr);
+    if (popped_neighbor != NULL) {
+        *out = VSW_RM_PEER_OK_MSG;
+    } else {
+        *out = VSW_RM_PEER_NOT_FOUND_MSG;
     }
     // EXIT CRITICAL SECTION
     pthread_mutex_unlock(&vswitch->lock);
@@ -130,7 +168,16 @@ Process a configuration removal command (e.g 'remove' command).
 The output of the command will get pointed to by 'out'.
 */
 void vsw_cli_process_rm_cmd(vsw_state_t *vswitch, char **out) {
-
+    char *tok = strtok(NULL, ARG_DELIM);
+    if (tok == NULL) {
+        *out = VSW_BAD_ARGS_MSG;
+    }
+    else if (strcmp(tok, "trunk") == 0) {
+        vsw_cli_process_rm_trunk_cmd(vswitch, out);
+    }
+    else {
+        *out = VSW_BAD_OBJ_MSG;
+    }
 }
 
 /*
