@@ -42,4 +42,10 @@ returns a pointer to the struct, otherwise, returns NULL.
 */
 vsw_neighbor_t *vsw_search_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in *addr);
 
+/*
+Removes a neighbor from the array of the neighbors by socket pair. 
+If found, a pointer to the removed neighbor is returned, otherwise, NULL is returned.
+*/
+vsw_neighbor_t *vsw_remove_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in  *addr);
+
 #endif

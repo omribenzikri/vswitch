@@ -111,3 +111,13 @@ vsw_neighbor_t *vsw_search_neighbor(vsw_neighbor_t *neighbors, size_t count, str
     }
     return NULL;
 }
+
+vsw_neighbor_t *vsw_remove_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in *addr) {
+    for (int i = 0; i < count; i++) {
+        if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
+            neighbors[i].used = false;
+            return &neighbors[i];
+        }
+    }
+    return NULL;
+}
