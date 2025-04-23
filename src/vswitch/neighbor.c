@@ -89,12 +89,15 @@ vsw_neighbor_t *vsw_add_neighbor(vsw_neighbor_t *neighbors, size_t count, struct
         .addr = *addr
     };
     for (int i = 0; i < count; i++) {
-        // If neighbor already exists, just return
-        if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
-            return &neighbors[i];
+        if (neighbors[i].used) {
+            // If neighbor already exists, just return
+            if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr &&addr->sin_port == neighbors[i].addr.sin_port) {
+                return &neighbors[i];
+            }
+            continue;
         }
         // Empty slot found, insert here
-        if (!neighbors[i].used) {
+        else {
             neighbors[i] = new;
             return &neighbors[i];
         }
@@ -105,6 +108,9 @@ vsw_neighbor_t *vsw_add_neighbor(vsw_neighbor_t *neighbors, size_t count, struct
 
 vsw_neighbor_t *vsw_search_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in *addr) {
     for (int i = 0; i < count; i++) {
+        if (!neighbors[i].used) {
+            continue;
+        }
         if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
             return &neighbors[i];
         }
@@ -114,6 +120,9 @@ vsw_neighbor_t *vsw_search_neighbor(vsw_neighbor_t *neighbors, size_t count, str
 
 vsw_neighbor_t *vsw_remove_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in *addr) {
     for (int i = 0; i < count; i++) {
+        if (!neighbors[i].used) {
+            continue;
+        }
         if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
             neighbors[i].used = false;
             return &neighbors[i];

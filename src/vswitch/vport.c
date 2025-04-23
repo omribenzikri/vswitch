@@ -143,12 +143,15 @@ vsw_vport_t *vsw_add_vport(vsw_vport_t *vports, size_t count, struct sockaddr_in
     memset(&new.stats, 0, sizeof(new.stats));
 
     for (int i = 0; i < count; i++) {
-        // Interface already exists, just return
-        if (addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && addr->sin_port == vports[i].addr.sin_port) {
-            return &vports[i];
+        if (vports[i].used) {
+            // Interface already exists, just return
+            if (addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && addr->sin_port == vports[i].addr.sin_port) {
+                return &vports[i];
+            }
+            continue;
         }
         // Empty slot found, insert here
-        if (!vports[i].used) {
+        else {
             vports[i] = new;
             return &vports[i];
         }
