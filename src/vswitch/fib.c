@@ -89,9 +89,11 @@ void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw
     // for replacement in case its fully occupied.
     for (int i = 0; i < tbl_size; i++) {
         // Unused slot found
-        if (!tbl[i].used && !free_slot_found) {
-            free_slot = &tbl[i];
-            free_slot_found = true;
+        if (!tbl[i].used) {
+            if (!free_slot_found) {
+                free_slot = &tbl[i];
+                free_slot_found = true;
+            }
         }
         // If an entry for this MAC addres already exists, just return
         if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
