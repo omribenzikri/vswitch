@@ -30,7 +30,7 @@ void vsw_cli_process_add_trunk_cmd(vsw_state_t *vswitch, char **out) {
         return;
     }
     in_addr_t addr = inet_addr(tok);
-    if (addr == -1) {
+    if (addr == ( in_addr_t)(-1)) {
         *out = VSW_BAD_ADDR_MSG;
         return;
     }
