@@ -95,13 +95,15 @@ void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw
                 free_slot_found = true;
             }
         }
-        // If an entry for this MAC addres already exists, just return
-        if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
-            return;
-        } else if (tbl[i].created < old_age) {
-            // Check if entry is the oldest
-            old_age = tbl[i].created;
-            old_idx = i;
+        else {
+            // If an entry for this MAC address already exists, just return
+            if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
+                return;
+            } else if (tbl[i].created < old_age) {
+                // Check if entry is the oldest
+                old_age = tbl[i].created;
+                old_idx = i;
+            }
         }
     }
 
