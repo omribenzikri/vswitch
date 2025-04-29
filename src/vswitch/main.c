@@ -66,19 +66,16 @@ int main() {
     pthread_t cleanup_thread_pid;
     pthread_create(&cleanup_thread_pid, NULL, &vsw_cleanup, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started cleanup thread.");
-    log_message(log_buf, LOG_DEBUG);
 
     // Start CLI server thread
     pthread_t cli_thread_pid;
     pthread_create(&cli_thread_pid, NULL, &vsw_cli_serve, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started CLI server thread.");
-    log_message(log_buf, LOG_DEBUG);
 
     // Start neighbor heartbeat thread
     pthread_t heartbeat_thread_pid;
     pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_neighbor_heartbeats, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started neighbor heartbeat thread.");
-    log_message(log_buf, LOG_DEBUG);
 
     struct sockaddr_in vp_addr;
     socklen_t vp_addr_len = sizeof(vp_addr);
