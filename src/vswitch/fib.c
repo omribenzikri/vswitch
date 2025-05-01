@@ -3,7 +3,6 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
-#include <assert.h>
 #include <netinet/in.h>
 #include <netinet/ether.h>
 #include <net/ethernet.h>
@@ -76,7 +75,6 @@ size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vpor
 void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw_vport_t *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
-    bool free_slot_found = false;
     vsw_entry_t *free_slot = NULL;
     vsw_entry_t new = {
         .used = true,
@@ -90,9 +88,8 @@ void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw
     for (int i = 0; i < tbl_size; i++) {
         // Unused slot found
         if (!tbl[i].used) {
-            if (!free_slot_found) {
+            if (free_slot == NULL) {
                 free_slot = &tbl[i];
-                free_slot_found = true;
             }
         }
         else {
@@ -107,8 +104,7 @@ void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw
         }
     }
 
-    if (free_slot_found) {
-        assert(free_slot != NULL);
+    if (free_slot != NULL) {
         // Insdert new entry in free slot
         *free_slot = new;
     } else {
