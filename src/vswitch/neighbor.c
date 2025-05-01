@@ -83,26 +83,30 @@ size_t vsw_neighbor_table_to_str(vsw_neighbor_t *neighbors, size_t neighbor_coun
 
 
 vsw_neighbor_t *vsw_add_neighbor(vsw_neighbor_t *neighbors, size_t count, struct sockaddr_in *addr) {
+    vsw_neighbor_t *free_slot = NULL;
     vsw_neighbor_t new = {
         .used = true,
         .status = VSW_TRUNK_UINITIALIZED,
         .addr = *addr
     };
+
     for (int i = 0; i < count; i++) {
         if (neighbors[i].used) {
             // If neighbor already exists, just return
-            if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr &&addr->sin_port == neighbors[i].addr.sin_port) {
+            if (addr->sin_addr.s_addr == neighbors[i].addr.sin_addr.s_addr && addr->sin_port == neighbors[i].addr.sin_port) {
                 return &neighbors[i];
             }
-            continue;
         }
-        // Empty slot found, insert here
-        else {
-            neighbors[i] = new;
-            return &neighbors[i];
+        // Empty slot found
+        else if (free_slot == NULL) {
+            free_slot = &neighbors[i];
         }
     }
-    return NULL;
+    // Insert new entry if empty slot found
+    if (free_slot != NULL) {
+        *free_slot = new;
+    }
+    return free_slot;
 }
 
 

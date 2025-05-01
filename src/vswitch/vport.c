@@ -135,6 +135,7 @@ size_t vsw_vport_stats_table_to_str(vsw_vport_t *vports, size_t count, char **bu
 
 
 vsw_vport_t *vsw_add_vport(vsw_vport_t *vports, size_t count, struct sockaddr_in *addr) {
+    vsw_vport_t *free_slot = NULL;
     vsw_vport_t new = {
         .used = true,
         .last_seen = time(NULL),
@@ -148,15 +149,17 @@ vsw_vport_t *vsw_add_vport(vsw_vport_t *vports, size_t count, struct sockaddr_in
             if (addr->sin_addr.s_addr == vports[i].addr.sin_addr.s_addr && addr->sin_port == vports[i].addr.sin_port) {
                 return &vports[i];
             }
-            continue;
         }
-        // Empty slot found, insert here
-        else {
-            vports[i] = new;
-            return &vports[i];
+        // Empty slot found
+        else if (free_slot == NULL) {
+            free_slot = &vports[i];
         }
     }
-    return NULL;
+    // Insert new entry if empty slot found
+    if (free_slot != NULL) {
+        *free_slot = new;
+    }
+    return free_slot;
 }
 
 
