@@ -13,18 +13,19 @@ char *VSW_BAD_CMD_MSG  = "Unrecognized command.";
 char *VSW_BAD_OBJ_MSG  = "Unrecognized object.";
 char *VSW_BAD_ARGS_MSG  = "Incorrect number of arguments passed.";
 char *VSW_BAD_ADDR_MSG  = "Invalid IP address supplied.";
-char *VSW_MAX_PEERS_MSG  = "Failed to connect to peer vswitch - all local peer slots are in use";
+char *VSW_MAX_PEERS_MSG  = "Failed to connect to peer vswitch - all local peer slots are in use.";
 char *VSW_CONN_OK_MSG  = "Successfully connected to neighbor vswitch.";
 char *VSW_CONN_FULL_MSG  = "Failed to connect to neighbor vswitch - no available vports on the peer.";
 char *VSW_CONN_TIMEOUT_MSG  = "Failed to connect to neighbor vswitch - connection timed out.";
-char *VSW_RM_PEER_OK_MSG = "Sucessfully removed the neighbor vswitch";
+char *VSW_CONN_EXISTS_MSG = "Trunk link for this neighbor already exists.";
+char *VSW_RM_PEER_OK_MSG = "Sucessfully removed the neighbor vswitch.";
 char *VSW_RM_PEER_NOT_FOUND_MSG = "Failed to remove the neighbor vswitch - neighbor not found.";
 
 /*
 Process trunk connection command. The output of the command will get pointed to by
 'out'.
 */
-void vsw_cli_process_add_trunk_cmd(vsw_state_t *vswitch, char **out) {
+void vsw_cli_process_create_trunk_cmd(vsw_state_t *vswitch, char **out) {
     // Parse command for peer address
     char *tok = strtok(NULL, ARG_DELIM);
     if (tok == NULL || strtok(NULL, ARG_DELIM) != NULL) {
@@ -45,6 +46,11 @@ void vsw_cli_process_add_trunk_cmd(vsw_state_t *vswitch, char **out) {
     };
     // ENTER CRITICAL SECTION
     pthread_mutex_lock(&vswitch->lock);
+    if (vsw_search_neighbor(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, &peer_addr) != NULL) {
+        *out = VSW_CONN_EXISTS_MSG;
+        pthread_mutex_unlock(&vswitch->lock);
+        return;
+    }
     vsw_neighbor_t *new_neighbor = vsw_add_neighbor(vswitch->neighbors, VSW_NEIGHBOR_ARR_SIZE, &peer_addr);
     if (new_neighbor == NULL) {
         *out = VSW_MAX_PEERS_MSG;
@@ -150,13 +156,13 @@ bool vsw_cli_process_diag_cmd(vsw_state_t *vswitch, char **out) {
 Process a configuration addition command (e.g 'add' command).
 The output of the command will get pointed to by 'out'.
 */
-void vsw_cli_process_add_cmd(vsw_state_t *vswitch, char **out) {
+void vsw_cli_process_create_cmd(vsw_state_t *vswitch, char **out) {
     char *tok = strtok(NULL, ARG_DELIM);
     if (tok == NULL) {
         *out = VSW_BAD_ARGS_MSG;
     }
     else if (strcmp(tok, "trunk") == 0) {
-        vsw_cli_process_add_trunk_cmd(vswitch, out);
+        vsw_cli_process_create_trunk_cmd(vswitch, out);
     }
     else {
         *out = VSW_BAD_OBJ_MSG;
@@ -199,8 +205,8 @@ bool vsw_cli_process_cmd(vsw_state_t *vswitch, char *cmd, char **out) {
         // EXIT CRITICAL SECTION
         pthread_mutex_unlock(&vswitch->lock);
     }
-    else if (strcmp(tok, "add") == 0) {
-        vsw_cli_process_add_cmd(vswitch, out);
+    else if (strcmp(tok, "create") == 0) {
+        vsw_cli_process_create_cmd(vswitch, out);
     }
     else if (strcmp(tok, "remove") == 0) {
         vsw_cli_process_rm_cmd(vswitch, out);
