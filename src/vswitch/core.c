@@ -178,17 +178,6 @@ void *vsw_cleanup(void * _vswitch) {
     while (true) {
         // ENTER CRITICAL SECTION
         pthread_mutex_lock(&vswitch->lock);
-        for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
-            if (!vswitch->mac_addr_tbl[i].used) {
-                continue;
-            }
-            age = time(NULL) - vswitch->mac_addr_tbl[i].created;
-            // Check if the entry is too old, or if the vport it points to is no longer active
-            if (age > VSW_MAC_ENTRY_MAX_AGE || vsw_search_vport(vswitch->vports, VSW_VPORT_ARR_SIZE, &vswitch->vports[i].addr) == NULL) {
-                // Set entry to unused
-                vswitch->mac_addr_tbl[i].used = false;
-            }
-        }
         for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
             if (!vswitch->vports[i].used) {
                 continue;
@@ -204,6 +193,17 @@ void *vsw_cleanup(void * _vswitch) {
                 }
                 snprintf(log_buf, sizeof(log_buf), "Removed inactive vport from underlay address: %s", addr_buf);
                 log_message(log_buf, LOG_INFO);
+            }
+        }
+        for (int i = 0; i < VSW_MAC_ADDR_TBL_SIZE; i++) {
+            if (!vswitch->mac_addr_tbl[i].used) {
+                continue;
+            }
+            age = time(NULL) - vswitch->mac_addr_tbl[i].created;
+            // Check if the entry is too old, or if the vport it points to is no longer active
+            if (age > VSW_MAC_ENTRY_MAX_AGE || !vswitch->mac_addr_tbl[i].vport->used) {
+                // Set entry to unused
+                vswitch->mac_addr_tbl[i].used = false;
             }
         }
         // EXIT CRITICAL SECTION
