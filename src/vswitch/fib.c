@@ -50,6 +50,8 @@ size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vpor
             continue;
         }
 
+        vport_idx = 0;
+
         // Construct row
         row_len = snprintf(row_buf, MAX_ROW_LEN, "%-23sVirt/%-18d%ld\n", mac_addr_str, vport_idx + 1, time(NULL) - tbl[i].created);
 
@@ -75,7 +77,6 @@ size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vpor
 void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw_vport_t *vport) {
     int old_idx = 0;
     time_t old_age = LONG_MAX;
-    vsw_entry_t *free_slot = NULL;
     vsw_entry_t new = {
         .used = true,
         .vport = vport,
@@ -86,31 +87,19 @@ void vsw_add_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr, vsw
     // Search for free slot in the table, while also looking for the oldest entry in the table
     // for replacement in case its fully occupied.
     for (int i = 0; i < tbl_size; i++) {
-        // Unused slot found
+        // Unused slot found, insert here
         if (!tbl[i].used) {
-            if (free_slot == NULL) {
-                free_slot = &tbl[i];
-            }
+            tbl[i] = new;
+            return;
         }
-        else {
-            // If an entry for this MAC address already exists, just return
-            if (memcmp(tbl[i].mac_addr, mac_addr, ETHER_ADDR_LEN) == 0) {
-                return;
-            } else if (tbl[i].created < old_age) {
-                // Check if entry is the oldest
-                old_age = tbl[i].created;
-                old_idx = i;
-            }
+        else if (tbl[i].created < old_age) {
+            // Check if entry is the oldest
+            old_age = tbl[i].created;
+            old_idx = i;
         }
     }
-
-    if (free_slot != NULL) {
-        // Insdert new entry in free slot
-        *free_slot = new;
-    } else {
-        // Replace the oldest entry in the table
-        tbl[old_idx] = new;
-    }
+    // Replace the oldest entry in the table
+    tbl[old_idx] = new;
 }
 
 vsw_entry_t *vsw_search_mac_entry(vsw_entry_t *tbl, size_t tbl_size, uint8_t *mac_addr) {
