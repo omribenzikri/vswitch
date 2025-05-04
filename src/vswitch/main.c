@@ -117,7 +117,12 @@ int main() {
                 vport->last_seen = time(NULL); 
                 break;
             case VSW_CTRL_MSG_JOIN:
-                // Join message received - add a new virtual interface connection
+                // Join message received - check to see if vport already exists, otherwise add it
+                if (vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr) != NULL) {
+                    pthread_mutex_unlock(&lock);
+                    continue;
+                }
+                // Add a new vport
                 vsw_vport_t *new_vport = vsw_add_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 // Format an appropriate response
                 uint8_t response = new_vport == NULL ? VSW_CTRL_MSG_FULL : VSW_CTRL_MSG_FREE;
@@ -157,7 +162,6 @@ int main() {
                 }
                 break;
             case VSW_CTRL_MSG_TRAFFIC:
-                
                 // Strip the custom tunnel header
                 uint8_t *ether_frame = buf + VSW_CTRL_HDR_SIZE;
                 size_t ether_frame_size = bytes_recvd - VSW_CTRL_HDR_SIZE;
@@ -180,8 +184,10 @@ int main() {
                 src_vport->stats.rx_bytes += ether_frame_size;
                 src_vport->stats.rx_packets++;
 
-                // Add new MAC address table entry
-                vsw_add_mac_entry(mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, hdr->ether_shost, src_vport);
+                // Add new MAC address table entry if necessary
+                if (vsw_search_mac_entry(mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, hdr->ether_shost) == NULL) {
+                    vsw_add_mac_entry(mac_addr_tbl, VSW_MAC_ADDR_TBL_SIZE, hdr->ether_shost, src_vport);
+                }
 
                 // Determine what to do with the frame
                 vsw_entry_t *dst_entry;
