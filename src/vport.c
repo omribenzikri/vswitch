@@ -17,7 +17,7 @@
 #include "proto.h"
 #include "util/logging.h"
 
-#define VP_HRTBT_INTERVAL 2
+#define VP_HEARTBEAT_INTERVAL 2
 #define VP_JOIN_MAX_RETRIES 5
 #define VP_RECV_TIMEOUT 2
 #define VP_VSWITCH_UNREACHABLE -1
@@ -157,7 +157,7 @@ void *vp_send_heartbeats(void *_vport) {
             exit(EXIT_FAILURE);
         }
         // Sleep until the next heartbeat
-        sleep(VP_HRTBT_INTERVAL);
+        sleep(VP_HEARTBEAT_INTERVAL);
     }
 }
 
