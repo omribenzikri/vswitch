@@ -61,4 +61,4 @@ The switch tracks all kinds of interface statistics which may be of interest to 
 Other diagnostic commands, e.g *show* commands, are also available in the CLI.
 
 ## Installation
-Build the project with `build.sh`, provided you're using GCC.
+Build the project with `make`, provided you're using GCC.
