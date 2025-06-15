@@ -14,25 +14,25 @@
 #include <net/ethernet.h>
 #include <stdbool.h>
 #include <pthread.h>
-#include "proto.h"
 #include "util/logging.h"
+#include "proto.h"
 
-#define VP_HEARTBEAT_INTERVAL 2
-#define VP_JOIN_MAX_RETRIES 5
-#define VP_RECV_TIMEOUT 2
-#define VP_VSWITCH_UNREACHABLE -1
+#define VW_HEARTBEAT_INTERVAL 2
+#define VW_JOIN_MAX_RETRIES 5
+#define VW_RECV_TIMEOUT 2
+#define VW_VSWITCH_UNREACHABLE -1
 
-// Represents an interface in the virtual overlay network
+// Represents a virtual link to the overlay network
 typedef struct {
     int tapfd;
     int sockfd;
     struct sockaddr_in vsw_addr;
-} vport_t;
+} vwire_t;
 
 /*
 Obtain ownership and return a file descriptor for TAP interface
 */
-int vp_tap_alloc(char *name) {
+int vw_tap_alloc(char *name) {
     const int tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
         log_sys_error();
@@ -58,7 +58,7 @@ Attemps to connect to the vswitch by continously sending join requests
 until a response is received from the vswitch. If a response was received, it is returned,
 otherwise, -1 returned.
 */
-int vp_conn_vswitch(const vport_t *vport) {
+int vw_conn_vswitch(const vwire_t *vwire) {
     uint8_t req = VSW_CTRL_MSG_JOIN;
     uint8_t res;
     ssize_t bytes_recvd;
@@ -67,7 +67,7 @@ int vp_conn_vswitch(const vport_t *vport) {
     int ret;
 
     struct timeval timeout_tv = {
-        .tv_sec = VP_RECV_TIMEOUT,
+        .tv_sec = VW_RECV_TIMEOUT,
         .tv_usec = 0
     };
     struct timeval default_tv = {
@@ -76,21 +76,21 @@ int vp_conn_vswitch(const vport_t *vport) {
     };
     
     // Set a timeout for the recv call
-    ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
+    ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
     if (ret == -1) {
         log_sys_error();
         exit(EXIT_FAILURE);
     }
     
-    for (int i = 0; i < VP_JOIN_MAX_RETRIES; i++) {
+    for (int i = 0; i < VW_JOIN_MAX_RETRIES; i++) {
         // Send a join request to the vswitch
         bytes_sent = sendto(
-            vport->sockfd,
+            vwire->sockfd,
             &req,
             sizeof(req),
             0,
-            (struct sockaddr *)&vport->vsw_addr,
-            sizeof(vport->vsw_addr)
+            (struct sockaddr *)&vwire->vsw_addr,
+            sizeof(vwire->vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
@@ -98,11 +98,11 @@ int vp_conn_vswitch(const vport_t *vport) {
         }
         // Wait for a response from the vswitch
         bytes_recvd = recvfrom(
-            vport->sockfd,
+            vwire->sockfd,
             &res,
             sizeof(res),
             0,
-            (struct sockaddr *)&vport->vsw_addr,
+            (struct sockaddr *)&vwire->vsw_addr,
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
@@ -115,7 +115,7 @@ int vp_conn_vswitch(const vport_t *vport) {
         // Response received from vswitch
         else if (bytes_recvd > 0) {
             // Set timeout to the default
-            ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
+            ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
             if (ret == -1) {
                 log_sys_error();
                 exit(EXIT_FAILURE);
@@ -125,39 +125,38 @@ int vp_conn_vswitch(const vport_t *vport) {
     }
 
     // No response received from vswitch, set timeout to the default
-    ret = setsockopt(vport->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
+    ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
     if (ret == -1) {
         log_sys_error();
         exit(EXIT_FAILURE);
     }
-    return VP_VSWITCH_UNREACHABLE;
+    return VW_VSWITCH_UNREACHABLE;
 }
 
 /*
-Continously sends heartbeats messages to the vswitch to let it know the vport
-is still alive.
+Continously sends heartbeats messages to the vswitch to let it know the client is still alive.
 */
-void *vp_send_heartbeats(void *_vport) {
-    const vport_t *vport = (const vport_t *)_vport;
+void *vw_send_heartbeats(void *_vwire) {
+    const vwire_t *vwire = (const vwire_t *)_vwire;
     uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
 
     // Send heartbeats in an infinite loop
     while (true) {
         bytes_sent = sendto(
-            vport->sockfd,
+            vwire->sockfd,
             &msg,
             sizeof(msg),
             0,
-            (struct sockaddr *)&vport->vsw_addr,
-            sizeof(vport->vsw_addr)
+            (struct sockaddr *)&vwire->vsw_addr,
+            sizeof(vwire->vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
         // Sleep until the next heartbeat
-        sleep(VP_HEARTBEAT_INTERVAL);
+        sleep(VW_HEARTBEAT_INTERVAL);
     }
 }
 
@@ -165,8 +164,8 @@ void *vp_send_heartbeats(void *_vport) {
 Continously reads incoming data from the TAP interface and when it arrives,
 orwards it through the underlay UDP socket
 */
-void *vp_forward_data_to_vswitch(void *_vport) {
-    const vport_t *vport = (const vport_t *)_vport;
+void *vw_forward_data_to_vswitch(void *_vwire) {
+    const vwire_t *vwire = (const vwire_t *)_vwire;
 
     // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
     uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
@@ -179,7 +178,7 @@ void *vp_forward_data_to_vswitch(void *_vport) {
     while (true) {
         // Read an ethernet frame from the TAP interface
         ether_bytes_read = read(
-            vport->tapfd,
+            vwire->tapfd,
             buf + VSW_CTRL_HDR_SIZE,
             sizeof(buf) - VSW_CTRL_HDR_SIZE
         );
@@ -193,12 +192,12 @@ void *vp_forward_data_to_vswitch(void *_vport) {
     
         // Forward the frame through the socket
         bytes_sent = sendto(
-            vport->sockfd,
+            vwire->sockfd,
             buf,
             ether_bytes_read + VSW_CTRL_HDR_SIZE,
             0,
-            (struct sockaddr *)&vport->vsw_addr,
-            sizeof(vport->vsw_addr)
+            (struct sockaddr *)&vwire->vsw_addr,
+            sizeof(vwire->vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
@@ -211,8 +210,8 @@ void *vp_forward_data_to_vswitch(void *_vport) {
 Continously reads incoming data from the underlay socket and forwards it
 through the TAP to the linux kernel networking stack
 */
-void *vp_forward_data_to_tap(void *_vport) {
-    const vport_t *vport = (const vport_t *)_vport;
+void *vw_forward_data_to_tap(void *_vwire) {
+    const vwire_t *vwire = (const vwire_t *)_vwire;
 
     // Buffer for storing received ethernet frames
     uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
@@ -223,11 +222,11 @@ void *vp_forward_data_to_tap(void *_vport) {
     while (true) {
         // Receive a frame from the socket
         bytes_recvd = recvfrom(
-            vport->sockfd,
+            vwire->sockfd,
             buf,
             sizeof(buf),
             0,
-            (struct sockaddr *)&vport->vsw_addr,
+            (struct sockaddr *)&vwire->vsw_addr,
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
@@ -239,7 +238,7 @@ void *vp_forward_data_to_tap(void *_vport) {
         }
         // Write the frame to the TAP
         ether_bytes_written = write(
-            vport->tapfd,
+            vwire->tapfd,
             buf + VSW_CTRL_HDR_SIZE,
             bytes_recvd - VSW_CTRL_HDR_SIZE
         );
@@ -252,13 +251,13 @@ void *vp_forward_data_to_tap(void *_vport) {
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        printf("Usage: vport [ADDR] [TAP]\n");
+        printf("Usage: vwire [ADDR] [TAP]\n");
         exit(EXIT_FAILURE);
     }
     char log_buf[128];
 
     // Open TAP interface
-    int tapfd = vp_tap_alloc(argv[2]);
+    int tapfd = vw_tap_alloc(argv[2]);
     snprintf(log_buf, sizeof(log_buf), "Successfully opened TAP interface: '%s'", argv[2]);
     log_message(log_buf, LOG_INFO);
 
@@ -270,7 +269,7 @@ int main(int argc, char **argv) {
     }
 
     // Group related resources into one passable object
-    vport_t vport = {
+    vwire_t vwire = {
         .tapfd = tapfd,
         .sockfd = sockfd,
         .vsw_addr = {
@@ -282,10 +281,10 @@ int main(int argc, char **argv) {
         }
     };
 
-    int ret = vp_conn_vswitch(&vport);
+    int ret = vw_conn_vswitch(&vwire);
     switch (ret)
     {
-        case VP_VSWITCH_UNREACHABLE:
+        case VW_VSWITCH_UNREACHABLE:
             log_message("Connection to vswitch timed-out.", LOG_ERROR);
             exit(EXIT_FAILURE);
             break;
@@ -303,9 +302,9 @@ int main(int argc, char **argv) {
     pthread_t heartbeat_thread_pid;
 
     // Start two threads - one for receiving and one for sending
-    pthread_create(&read_thread_pid, NULL, &vp_forward_data_to_vswitch, &vport);
-    pthread_create(&write_thread_pid, NULL, &vp_forward_data_to_tap, &vport);
-    pthread_create(&heartbeat_thread_pid, NULL, &vp_send_heartbeats, &vport);
+    pthread_create(&read_thread_pid, NULL, &vw_forward_data_to_vswitch, &vwire);
+    pthread_create(&write_thread_pid, NULL, &vw_forward_data_to_tap, &vwire);
+    pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, &vwire);
 
     pthread_join(read_thread_pid, NULL);
     pthread_join(write_thread_pid, NULL);
