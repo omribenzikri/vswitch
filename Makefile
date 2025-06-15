@@ -15,11 +15,11 @@ VSWITCH_TARGET = $(VSWITCH_BUILD_DIR)/vswitch
 VSWITCH_SOURCES = $(wildcard $(VSWITCH_SOURCE_DIR)/*.c)
 VSWITCH_OBJECTS = $(subst $(SOURCE_DIR), $(BUILD_DIR), $(patsubst %.c, %.o, $(VSWITCH_SOURCES)))
 
-VPORT_BUILD_DIR = $(BUILD_DIR)/vport
-VPORT_SOURCE_DIR = $(SOURCE_DIR)/vport
-VPORT_TARGET = $(VPORT_BUILD_DIR)/vport
-VPORT_SOURCES = $(wildcard $(VPORT_SOURCE_DIR)/*.c)
-VPORT_OBJECTS = $(subst $(SOURCE_DIR), $(BUILD_DIR), $(patsubst %.c, %.o, $(VPORT_SOURCES)))
+VWIRE_BUILD_DIR = $(BUILD_DIR)/vwire
+VWIRE_SOURCE_DIR = $(SOURCE_DIR)/vwire
+VWIRE_TARGET = $(VWIRE_BUILD_DIR)/vwire
+VWIRE_SOURCES = $(wildcard $(VWIRE_SOURCE_DIR)/*.c)
+VWIRE_OBJECTS = $(subst $(SOURCE_DIR), $(BUILD_DIR), $(patsubst %.c, %.o, $(VWIRE_SOURCES)))
 
 VSWSH_BUILD_DIR = $(BUILD_DIR)/vswsh
 VSWSH_SOURCE_DIR = $(SOURCE_DIR)/vswsh
@@ -27,15 +27,15 @@ VSWSH_TARGET = $(VSWSH_BUILD_DIR)/vswsh
 VSWSH_SOURCES = $(wildcard $(VSWSH_SOURCE_DIR)/*.c)
 VSWSH_OBJECTS = $(subst $(SOURCE_DIR), $(BUILD_DIR), $(patsubst %.c, %.o, $(VSWSH_SOURCES)))
 
-all: vswitch vport vswsh
+all: vswitch vwire vswsh
 
 vswitch: $(VSWITCH_OBJECTS) $(UTIL_OBJECTS)
 	$(CC) -o $(VSWITCH_TARGET) $^
 	@echo "===== BUILT VSWITCH ====="
 
-vport: $(VPORT_OBJECTS) $(UTIL_OBJECTS)
-	$(CC) -o $(VPORT_TARGET) $^
-	@echo "===== BUILT VPORT ====="
+vwire: $(VWIRE_OBJECTS) $(UTIL_OBJECTS)
+	$(CC) -o $(VWIRE_TARGET) $^
+	@echo "===== BUILT vwire ====="
 
 vswsh: $(VSWSH_OBJECTS)
 	$(CC) -o $(VSWSH_TARGET) $^
@@ -49,7 +49,7 @@ $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 	mkdir -p $(UTIL_BUILD_DIR)
 	mkdir -p $(VSWITCH_BUILD_DIR)
-	mkdir -p $(VPORT_BUILD_DIR)
+	mkdir -p $(VWIRE_BUILD_DIR)
 	mkdir -p $(VSWSH_BUILD_DIR)
 	@echo "======================================="
 
