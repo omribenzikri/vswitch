@@ -11,24 +11,30 @@ Note that the P in VPN is sort of a lie at this point in time, as the data is no
 | +------------------+     +------------------------^^-----+ |
 |                                                   ||       |
 |       +------------+     +-------+     +----------vv---+   |
-|  ||=> | UDP Socket | <=> | vPort | <=> | TAP Interface |   |
+|  ||=> | UDP Socket | <=> | vWire | <=> | TAP Interface |   |
 |  ||   +------------+     +-------+     +---------------+   |
 +--||--------------------------------------------------------+
    ||
-+--vv--------------+
-| Underlay Network <========||
-+------------------+        ||
-                          +-vv------+
-                          | vSwitch |
-                          +-^^------+
-+------------------+        ||
-| Underlay Network <========||
-+--^^--------------+
++--vv--------------+    +------------------------------------+
+| Underlay Network <=========||                     VSWITCH  |
++------------------+    |    ||                              |
+                        |  +-vv----+                         |
+                        |  | vPort <======||                 |
+                        |  +-^^----+      ||                 |
+                        |               +-vv--+              |
+                        |               | FIB |              |
+                        |               +-^^--+              |
+                        |  +-vv----+      ||                 |
+                        |  | vPort <======||                 |
+                        |  +-^^----+                         |
++------------------+    |    ||                              |
+| Underlay Network <=========||                              |
++--^^--------------+    +------------------------------------+
    ||
 +--||--------------------------------------------------------+
 |  ||                                            COMPUTER B  |   
 |  ||   +------------+     +-------+     +---------------+   |
-|  ||=> | UDP Socket | <=> | vPort | <=> | TAP Interface |   |
+|  ||=> | UDP Socket | <=> | vWire | <=> | TAP Interface |   |
 |       +------------+     +-------+     +----------^^---+   |
 |                                                   ||       |
 | +------------------+     +------------------------vv-----+ |
@@ -41,9 +47,9 @@ Note that the P in VPN is sort of a lie at this point in time, as the data is no
 The vPort client creates an ethernet-in-ethernet tunnel in which the inner Ethernet frame is encapsulated by a 1-byte custom header used for
 control information of the switch (see `include/proto.h`). Overall, the frame structure is as follows:
 ```
-+-----------------------------------------------------------------------------------------------------------+
-| Ethernet Header | IP Header | UDP Header | Control Header | Ethernet Header | IP Header | Payload (L4-L7) |
-+-----------------------------------------------------------------------------------------------------------+
++------------------------------------------------------------------------+
+| Ethernet | IP | UDP | Control Header | Ethernet | IP | Payload (L4-L7) |
++------------------------------------------------------------------------+
 ```
 
 ## Features
