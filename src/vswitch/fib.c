@@ -50,8 +50,6 @@ size_t vsw_mac_table_to_str(vsw_entry_t *tbl, size_t tbl_size, vsw_vport_t *vpor
             continue;
         }
 
-        vport_idx = 0;
-
         // Construct row
         row_len = snprintf(row_buf, MAX_ROW_LEN, "%-23sVirt/%-18d%ld\n", mac_addr_str, vport_idx + 1, time(NULL) - tbl[i].created);
 
