@@ -44,7 +44,7 @@ Note that the P in VPN is sort of a lie at this point in time, as the data is no
 ```
 
 ## Packet Structure
-The vPort client creates an ethernet-in-ethernet tunnel in which the inner Ethernet frame is encapsulated by a 1-byte custom header used for
+The vWire client creates an ethernet-in-ethernet tunnel in which the inner Ethernet frame is encapsulated by a 1-byte custom header used for
 control information of the switch (see `proto.h`). Overall, the frame structure is as follows:
 ```
 +------------------------------------------------------------------------+
