@@ -208,5 +208,8 @@ void *vsw_cleanup(void * _vswitch) {
         }
         // EXIT CRITICAL SECTION
         pthread_mutex_unlock(&vswitch->lock);
+        
+	// Sleep until next cleanup
+	sleep(VSW_CLEANUP_INTERVAL_MILLIS / 1000);
     }
 }
