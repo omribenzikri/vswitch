@@ -45,7 +45,7 @@ void vsw_connect_neighbor(vsw_state_t *vswitch, vsw_neighbor_t *peer) {
                 return;
             }
             // No response from the peer yet and timeout expired - send another join request
-            if (time(NULL) - last_req_time >= VSW_JOIN_RECV_TIMEOUT)  {
+            if (time(NULL) - last_req_time >= VSW_JOIN_RECV_TIMEOUT_SECS)  {
                 pthread_mutex_unlock(&vswitch->lock);
                 break;
             }
@@ -93,7 +93,7 @@ void *vsw_send_neighbor_heartbeats(void *_vswitch) {
         pthread_mutex_unlock(&vswitch->lock);
 
         // Sleep until the next heartbeat
-        sleep(VSW_HEARTBEAT_INTERVAL);
+        sleep(VSW_HEARTBEAT_INTERVAL_SECS);
     }
 }
 
@@ -184,7 +184,7 @@ void *vsw_cleanup(void * _vswitch) {
             }
             age = time(NULL) - vswitch->vports[i].last_seen;
             // Check if the vport is inactive
-            if (age > VSW_VPORT_MAX_INACTIVE) {
+            if (age > VSW_VPORT_MAX_INACTIVE_SECS) {
                 // Set slot to unused
                 vswitch->vports[i].used = false;
                 if (inet_ntop(AF_INET,  &vswitch->vports[i].addr.sin_addr, addr_buf, sizeof(addr_buf)) == NULL) {
@@ -201,7 +201,7 @@ void *vsw_cleanup(void * _vswitch) {
             }
             age = time(NULL) - vswitch->mac_addr_tbl[i].created;
             // Check if the entry is too old, or if the vport it points to is no longer active
-            if (age > VSW_MAC_ENTRY_MAX_AGE || !vswitch->mac_addr_tbl[i].vport->used) {
+            if (age > VSW_MAC_ENTRY_MAX_AGE_SECS || !vswitch->mac_addr_tbl[i].vport->used) {
                 // Set entry to unused
                 vswitch->mac_addr_tbl[i].used = false;
             }

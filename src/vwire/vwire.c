@@ -17,9 +17,9 @@
 #include "util/logging.h"
 #include "proto.h"
 
-#define VW_HEARTBEAT_INTERVAL 2
+#define VW_HEARTBEAT_INTERVAL_SECS 2
 #define VW_JOIN_MAX_RETRIES 5
-#define VW_RECV_TIMEOUT 2
+#define VW_RECV_TIMEOUT_SECS 2
 #define VW_VSWITCH_UNREACHABLE -1
 
 // Represents a virtual link to the overlay network
@@ -67,7 +67,7 @@ int vw_conn_vswitch(const vwire_t *vwire) {
     int ret;
 
     struct timeval timeout_tv = {
-        .tv_sec = VW_RECV_TIMEOUT,
+        .tv_sec = VW_RECV_TIMEOUT_SECS,
         .tv_usec = 0
     };
     struct timeval default_tv = {
@@ -156,7 +156,7 @@ void *vw_send_heartbeats(void *_vwire) {
             exit(EXIT_FAILURE);
         }
         // Sleep until the next heartbeat
-        sleep(VW_HEARTBEAT_INTERVAL);
+        sleep(VW_HEARTBEAT_INTERVAL_SECS);
     }
 }
 
