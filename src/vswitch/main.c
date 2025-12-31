@@ -74,7 +74,7 @@ int main() {
 
     // Start neighbor heartbeat thread
     pthread_t heartbeat_thread_pid;
-    pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_neighbor_heartbeats, &vswitch);
+    pthread_create(&heartbeat_thread_pid, NULL, &vsw_send_heartbeats, &vswitch);
     snprintf(log_buf, sizeof(log_buf), "Started neighbor heartbeat thread.");
 
     struct sockaddr_in vp_addr;

@@ -60,6 +60,6 @@ void vsw_connect_neighbor(vsw_state_t *vswitch, vsw_neighbor_t *peer);
 Continuously sends heartbeats to active peers to let them know that the vswitch is still alive.
 This function is meant to run on a separate thread.
 */
-void *vsw_send_neighbor_heartbeats(void *_vswitch);
+void *vsw_send_heartbeats(void *_vswitch);
 
 #endif

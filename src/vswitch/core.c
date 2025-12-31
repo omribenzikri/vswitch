@@ -63,7 +63,7 @@ void vsw_connect_neighbor(vsw_state_t *vswitch, vsw_neighbor_t *peer) {
 }
 
 
-void *vsw_send_neighbor_heartbeats(void *_vswitch) {
+void *vsw_send_heartbeats(void *_vswitch) {
     vsw_state_t *vswitch = (vsw_state_t *)_vswitch;
     uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
@@ -72,8 +72,8 @@ void *vsw_send_neighbor_heartbeats(void *_vswitch) {
     while (true) {
         // ENTER CRITICAL SECTION
         pthread_mutex_lock(&vswitch->lock);
-        for (int i = 0; i < VSW_NEIGHBOR_ARR_SIZE; i++) {
-            if (!vswitch->neighbors[i].used) {
+        for (int i = 0; i < VSW_VPORT_ARR_SIZE; i++) {
+            if (!vswitch->vports[i].used) {
                 continue;
             }
             bytes_sent = sendto(
@@ -81,7 +81,7 @@ void *vsw_send_neighbor_heartbeats(void *_vswitch) {
                 &msg,
                 sizeof(msg),
                 0,
-                (struct sockaddr *)&vswitch->neighbors[i].addr,
+                (struct sockaddr *)&vswitch->vports[i].addr,
                 sizeof(struct sockaddr_in)
             );
             if (bytes_sent == -1) {
@@ -96,6 +96,7 @@ void *vsw_send_neighbor_heartbeats(void *_vswitch) {
         sleep(VSW_HEARTBEAT_INTERVAL_SECS);
     }
 }
+
 
 vsw_action_t vsw_determine_switching_action(vsw_entry_t *mac_addr_tbl, uint8_t *mac_addr, vsw_vport_t *src_vport, vsw_entry_t **entry_ptr) {
     // L2 broadcast address
