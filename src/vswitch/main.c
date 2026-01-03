@@ -49,9 +49,6 @@ int main() {
     }
     snprintf(log_buf, sizeof(log_buf), "Bound underlay UDP socket to port: %d", VSW_UNDERLAY_PORT);
     log_message(log_buf, LOG_INFO);
-
-    // Mutex lock used for thread synchronization
-    pthread_mutex_t lock;
     
     // Group switch state data for passing into thread functions
     vsw_state_t vswitch = {
@@ -101,7 +98,7 @@ int main() {
         }
 
         // ENTER CRITICAL SECTION
-        pthread_mutex_lock(&lock);
+        pthread_mutex_lock(&vswitch.lock);
 
         uint8_t frame_type = *buf;
         switch (frame_type)
@@ -110,7 +107,7 @@ int main() {
                 // Heartbeat received - search for the vport by address
                 vsw_vport_t *vport = vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 if (vport == NULL) {
-                    pthread_mutex_unlock(&lock);
+                    pthread_mutex_unlock(&vswitch.lock);
                     continue;
                 }
                 // Reset the last seen parameter
@@ -119,7 +116,7 @@ int main() {
             case VSW_CTRL_MSG_JOIN:
                 // Join message received - check to see if vport already exists, otherwise add it
                 if (vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr) != NULL) {
-                    pthread_mutex_unlock(&lock);
+                    pthread_mutex_unlock(&vswitch.lock);
                     continue;
                 }
                 // Add a new vport
@@ -168,7 +165,7 @@ int main() {
                 
                 // Parse ethernet header
                 if (ether_frame_size <= ETHER_HDR_LEN) {
-                    pthread_mutex_unlock(&lock);
+                    pthread_mutex_unlock(&vswitch.lock);
                     continue;
                 }
                 struct ether_header *hdr = (struct ether_header *)ether_frame;
@@ -176,7 +173,7 @@ int main() {
                 // Search for the interface by address
                 vsw_vport_t *src_vport = vsw_search_vport(vport_arr, VSW_VPORT_ARR_SIZE, &vp_addr);
                 if (src_vport == NULL) {
-                    pthread_mutex_unlock(&lock);
+                    pthread_mutex_unlock(&vswitch.lock);
                     continue;
                 }
 
@@ -211,11 +208,11 @@ int main() {
         }
 
         // EXIT CRITICAL SECTION
-        pthread_mutex_unlock(&lock);
+        pthread_mutex_unlock(&vswitch.lock);
     }
 
     // Destroy lock
-    pthread_mutex_destroy(&lock);
+    pthread_mutex_destroy(&vswitch.lock);
 
     // Close UDP sockets
     close(sockfd);
