@@ -20,6 +20,7 @@
 #define VW_HEARTBEAT_INTERVAL_SECS 2
 #define VW_JOIN_MAX_RETRIES 5
 #define VW_RECV_TIMEOUT_SECS 2
+#define VW_VSWITCH_MAX_INACTIVE_SECS 10
 #define VW_VSWITCH_UNREACHABLE -1
 
 // Represents a virtual link to the overlay network
@@ -27,6 +28,8 @@ typedef struct {
     int tapfd;
     int sockfd;
     struct sockaddr_in vsw_addr;
+    time_t last_seen;
+    pthread_mutex_t lock;
 } vwire_t;
 
 /*
@@ -74,7 +77,7 @@ int vw_conn_vswitch(const vwire_t *vwire) {
         .tv_sec = 0,
         .tv_usec = 0
     };
-    
+
     // Set a timeout for the recv call
     ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
     if (ret == -1) {
@@ -134,27 +137,50 @@ int vw_conn_vswitch(const vwire_t *vwire) {
 }
 
 /*
-Continously sends heartbeats messages to the vswitch to let it know the client is still alive.
+This function runs on a dedicated thread and is responsible for maintaining heartbeats with the vswitch.
+* Continously sends heartbeats messages to the vswitch to let it know the client is still alive.
+* Checks, at every iteration, that the time since the last vswitch heartbeat has not exceededa a threshold,
+  and if so, terminates the program.
 */
-void *vw_send_heartbeats(void *_vwire) {
-    const vwire_t *vwire = (const vwire_t *)_vwire;
+void *vw_send_heartbeats(void *_vwire)
+{
+    vwire_t *vwire = (vwire_t *)_vwire;
+
     uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
+    int age;
+    int sockfd;
+    struct sockaddr_in vsw_addr;
+
+    pthread_mutex_lock(&vwire->lock);
+    sockfd = vwire->sockfd;
+    vsw_addr = vwire->vsw_addr;
+    pthread_mutex_unlock(&vwire->lock);
 
     // Send heartbeats in an infinite loop
     while (true) {
+        // Check liveness of the vswitch connection
+        pthread_mutex_lock(&vwire->lock);
+        age = time(NULL) - vwire->last_seen;
+        if (age > VW_VSWITCH_MAX_INACTIVE_SECS) {
+            log_message("Connection to vswitch is no longer active, terminating.", LOG_INFO);
+            exit(EXIT_SUCCESS);
+        }
+        pthread_mutex_unlock(&vwire->lock);
+
         bytes_sent = sendto(
-            vwire->sockfd,
+            sockfd,
             &msg,
             sizeof(msg),
             0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            sizeof(vwire->vsw_addr)
+            (struct sockaddr *)&vsw_addr,
+            sizeof(vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
+
         // Sleep until the next heartbeat
         sleep(VW_HEARTBEAT_INTERVAL_SECS);
     }
@@ -165,39 +191,50 @@ Continously reads incoming data from the TAP interface and when it arrives,
 forwards it through the underlay UDP socket
 */
 void *vw_send_data_to_vswitch(void *_vwire) {
-    const vwire_t *vwire = (const vwire_t *)_vwire;
+    vwire_t *vwire = (vwire_t *)_vwire;
 
     // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
     uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
-    ssize_t ether_bytes_read;
+    ssize_t bytes_read;
+    ssize_t bytes_sent;
+    
+    // Shared attributes
+    int tapfd;
+    int sockfd;
+    struct sockaddr_in vsw_addr;
+
+    pthread_mutex_lock(&vwire->lock);
+    tapfd = vwire->tapfd;
+    sockfd = vwire->sockfd;
+    vsw_addr = vwire->vsw_addr;
+    pthread_mutex_unlock(&vwire->lock);
 
     // Set message type to regular traffic
     buf[0] = VSW_CTRL_MSG_TRAFFIC;
-    ssize_t bytes_sent;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
-        ether_bytes_read = read(
-            vwire->tapfd,
+        bytes_read = read(
+            tapfd,
             buf + VSW_CTRL_HDR_SIZE,
             sizeof(buf) - VSW_CTRL_HDR_SIZE
         );
-        if (ether_bytes_read == -1) {
+        if (bytes_read == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        else if (ether_bytes_read <= ETHER_ADDR_LEN) {
+        else if (bytes_read <= ETHER_ADDR_LEN) {
             continue;
         }
-    
+
         // Forward the frame through the socket
         bytes_sent = sendto(
-            vwire->sockfd,
+            sockfd,
             buf,
-            ether_bytes_read + VSW_CTRL_HDR_SIZE,
+            bytes_read + VSW_CTRL_HDR_SIZE,
             0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            sizeof(vwire->vsw_addr)
+            (struct sockaddr *)&vsw_addr,
+            sizeof(vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
@@ -208,44 +245,81 @@ void *vw_send_data_to_vswitch(void *_vwire) {
 
 /*
 Continously reads incoming data from the underlay socket.
-* Control-plane data is handeled appropriately
-* Data-plane date is forwarded via the tap to the linux kernel networking stack
+* Controlplane data is handeled appropriately
+* Dataplane date is forwarded via the tap to the linux kernel networking stack
 */
 void *vw_recv_data_from_vswitch(void *_vwire) {
-    const vwire_t *vwire = (const vwire_t *)_vwire;
+    vwire_t *vwire = (vwire_t *)_vwire;
 
     // Buffer for storing received ethernet frames
     uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
-    ssize_t ether_bytes_written;
+    uint8_t frame_type;
+    uint8_t *ether_frame;
+    size_t ether_frame_size;
+    ssize_t bytes_written;
     ssize_t bytes_recvd;
     socklen_t vsw_addr_size;
+
+    // Shared attributes
+    int tapfd;
+    int sockfd;
+    struct sockaddr_in vsw_addr;
+
+    pthread_mutex_lock(&vwire->lock);
+    tapfd = vwire->tapfd;
+    sockfd = vwire->sockfd;
+    vsw_addr = vwire->vsw_addr;
+    pthread_mutex_unlock(&vwire->lock);
 
     while (true) {
         // Receive a frame from the socket
         bytes_recvd = recvfrom(
-            vwire->sockfd,
+            sockfd,
             buf,
             sizeof(buf),
             0,
-            (struct sockaddr *)&vwire->vsw_addr,
+            (struct sockaddr *)&vsw_addr,
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        else if (bytes_recvd <= ETHER_HDR_LEN + VSW_CTRL_HDR_SIZE) {
+
+        if (bytes_recvd < VSW_CTRL_HDR_SIZE) {
             continue;
         }
-        // Write the frame to the TAP
-        ether_bytes_written = write(
-            vwire->tapfd,
-            buf + VSW_CTRL_HDR_SIZE,
-            bytes_recvd - VSW_CTRL_HDR_SIZE
-        );
-        if (ether_bytes_written == -1) {
-            log_sys_error();
-            exit(EXIT_FAILURE);
+        ether_frame = buf + VSW_CTRL_HDR_SIZE;
+        ether_frame_size = bytes_recvd - VSW_CTRL_HDR_SIZE;
+        frame_type = *buf;
+
+        switch (frame_type)
+        {
+            case VSW_CTRL_MSG_TRAFFIC:
+                // Dataplane frame received - write it to the TAP
+                if (ether_frame_size <= ETHER_HDR_LEN) {
+                    continue;
+                }
+                bytes_written = write(
+                    tapfd,
+                    ether_frame,
+                    ether_frame_size
+                );
+                if (bytes_written == -1) {
+                    log_sys_error();
+                    exit(EXIT_FAILURE);
+                }
+                break;
+
+            case VSW_CTRL_MSG_HEARTBEAT:
+                pthread_mutex_lock(&vwire->lock);
+                // vswitch heartbeat received, reset the last seen parameter
+                vwire->last_seen = time(NULL);
+                pthread_mutex_unlock(&vwire->lock);
+                break;
+
+            default:
+                break;
         }
     }
 }
@@ -279,8 +353,10 @@ int main(int argc, char **argv) {
                 .s_addr = inet_addr(argv[1])
             },
             .sin_port = htons(9200)
-        }
+        },
+        .last_seen = time(NULL)
     };
+    pthread_mutex_init(&vwire.lock, NULL);
 
     int ret = vw_conn_vswitch(&vwire);
     switch (ret)
@@ -314,6 +390,8 @@ int main(int argc, char **argv) {
     // Close TAP interface UDP socket
     close(tapfd);
     close(sockfd);
+
+    pthread_mutex_destroy(&vwire.lock);
 
     return EXIT_SUCCESS;
 }
