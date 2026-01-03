@@ -162,9 +162,9 @@ void *vw_send_heartbeats(void *_vwire) {
 
 /*
 Continously reads incoming data from the TAP interface and when it arrives,
-orwards it through the underlay UDP socket
+forwards it through the underlay UDP socket
 */
-void *vw_forward_data_to_vswitch(void *_vwire) {
+void *vw_send_data_to_vswitch(void *_vwire) {
     const vwire_t *vwire = (const vwire_t *)_vwire;
 
     // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
@@ -207,10 +207,11 @@ void *vw_forward_data_to_vswitch(void *_vwire) {
 }
 
 /*
-Continously reads incoming data from the underlay socket and forwards it
-through the TAP to the linux kernel networking stack
+Continously reads incoming data from the underlay socket.
+* Control-plane data is handeled appropriately
+* Data-plane date is forwarded via the tap to the linux kernel networking stack
 */
-void *vw_forward_data_to_tap(void *_vwire) {
+void *vw_recv_data_from_vswitch(void *_vwire) {
     const vwire_t *vwire = (const vwire_t *)_vwire;
 
     // Buffer for storing received ethernet frames
@@ -297,17 +298,17 @@ int main(int argc, char **argv) {
             break;
     }
 
-    pthread_t read_thread_pid;
-    pthread_t write_thread_pid;
+    pthread_t send_thread_pid;
+    pthread_t recv_thread_pid;
     pthread_t heartbeat_thread_pid;
 
     // Start two threads - one for receiving and one for sending
-    pthread_create(&read_thread_pid, NULL, &vw_forward_data_to_vswitch, &vwire);
-    pthread_create(&write_thread_pid, NULL, &vw_forward_data_to_tap, &vwire);
+    pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, &vwire);
+    pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, &vwire);
     pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, &vwire);
 
-    pthread_join(read_thread_pid, NULL);
-    pthread_join(write_thread_pid, NULL);
+    pthread_join(send_thread_pid, NULL);
+    pthread_join(recv_thread_pid, NULL);
     pthread_join(heartbeat_thread_pid, NULL);
 
     // Close TAP interface UDP socket
