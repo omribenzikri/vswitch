@@ -1,19 +1,19 @@
-#include <fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <arpa/inet.h>
-#include <errno.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <net/ethernet.h>
+#include <netinet/in.h>
 #include <linux/if.h>
 #include <linux/if_tun.h>
-#include <netinet/in.h>
-#include <net/ethernet.h>
-#include <stdbool.h>
-#include <pthread.h>
 #include "util/logging.h"
 #include "proto.h"
 
@@ -84,7 +84,7 @@ int vw_conn_vswitch(const vwire_t *vwire) {
         log_sys_error();
         exit(EXIT_FAILURE);
     }
-    
+
     for (int i = 0; i < VW_JOIN_MAX_RETRIES; i++) {
         // Send a join request to the vswitch
         bytes_sent = sendto(
@@ -197,7 +197,7 @@ void *vw_send_data_to_vswitch(void *_vwire) {
     uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
     ssize_t bytes_read;
     ssize_t bytes_sent;
-    
+
     // Shared attributes
     int tapfd;
     int sockfd;
