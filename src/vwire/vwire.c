@@ -23,7 +23,6 @@
 #define VW_VSWITCH_MAX_INACTIVE_SECS 10
 #define VW_VSWITCH_UNREACHABLE -1
 
-// Represents a virtual link to the overlay network
 typedef struct {
     int tapfd;
     int sockfd;
@@ -32,28 +31,36 @@ typedef struct {
     pthread_mutex_t lock;
 } vwire_t;
 
-/*
-Obtain ownership and return a file descriptor for TAP interface
-*/
-int vw_tap_alloc(char *name) {
-    const int tapfd = open("/dev/net/tun", O_RDWR);
+
+int vw_tap_alloc(const char *name)
+{
+    struct ifreq ifr = {0};
+    int tapfd;
+    int ret;
+
+    tapfd = open("/dev/net/tun", O_RDWR);
     if (tapfd == -1) {
         log_sys_error();
-        exit(EXIT_FAILURE);
+        goto error;
     }
-    // Set up a request for our TAP
-    struct ifreq ifr;
-    memset(&ifr, 0, sizeof(ifr));
+
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
     snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", name);
 
-    // Take ownership of the TAP
-    int ret = ioctl(tapfd, TUNSETIFF, &ifr);
+    ret = ioctl(tapfd, TUNSETIFF, &ifr);
     if (ret == -1) {
         log_sys_error();
-        exit(EXIT_FAILURE);
+        goto error_close_tap;
     }
+
     return tapfd;
+
+error_close_tap:
+    ret = close(tapfd);
+    if (ret == -1)
+        log_sys_error();
+error:
+    return -1;
 }
 
 /*
@@ -324,41 +331,65 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
     }
 }
 
-int main(int argc, char **argv) {
-    if (argc < 3) {
-        printf("Usage: vwire [ADDR] [TAP]\n");
-        exit(EXIT_FAILURE);
-    }
-    char log_buf[128];
+int vw_alloc_resources(vwire_t *vwire, struct in_addr vsw_addr, const char *tap_name)
+{
+    int ret;
 
-    // Open TAP interface
-    int tapfd = vw_tap_alloc(argv[2]);
-    snprintf(log_buf, sizeof(log_buf), "Successfully opened TAP interface: '%s'", argv[2]);
-    log_message(log_buf, LOG_INFO);
+    vwire->tapfd = vw_tap_alloc(tap_name);
+    if (vwire->tapfd == -1)
+        goto error;
 
-    // Set up underlay UDP socket
-    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd == -1) {
+    log_message("Successfully opened TAP interface", LOG_INFO);
+
+    vwire->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (vwire->sockfd == -1) {
         log_sys_error();
-        exit(EXIT_FAILURE);
+        goto error_close_tap;
     }
 
-    // Group related resources into one passable object
-    vwire_t vwire = {
-        .tapfd = tapfd,
-        .sockfd = sockfd,
-        .vsw_addr = {
-            .sin_family = AF_INET,
-            .sin_addr = {
-                .s_addr = inet_addr(argv[1])
-            },
-            .sin_port = htons(9200)
-        },
-        .last_seen = time(NULL)
-    };
-    pthread_mutex_init(&vwire.lock, NULL);
+    vwire->vsw_addr.sin_family = AF_INET;
+    vwire->vsw_addr.sin_addr = vsw_addr;
+    vwire->vsw_addr.sin_port = htons(VSW_UNDERLAY_PORT);
 
-    int ret = vw_conn_vswitch(&vwire);
+    vwire->last_seen = time(NULL);
+    pthread_mutex_init(&vwire->lock, NULL);
+
+    return 0;
+
+error_close_tap:
+    ret = close(vwire->tapfd);
+    if (ret == -1)
+        log_sys_error();
+error:
+    return -1;
+}
+
+int main(int argc, char **argv)
+{
+    vwire_t vwire = {0};
+    struct in_addr vsw_addr;
+    int ret;
+
+    pthread_t send_thread_pid;
+    pthread_t recv_thread_pid;
+    pthread_t heartbeat_thread_pid;
+
+    if (argc != 3) {
+        fprintf(stderr, "Usage: vwire ADDR TAP\n");
+        return EXIT_FAILURE;
+    }
+
+    ret = inet_pton(AF_INET, argv[1], &vsw_addr);
+    if (ret != 1) {
+        fprintf(stderr, "Error: invalid vswitch address supplied\n");
+        return EXIT_FAILURE;
+    }
+
+    ret = vw_alloc_resources(&vwire, vsw_addr, argv[2]);
+    if (ret == -1)
+        return EXIT_FAILURE;
+
+    ret = vw_conn_vswitch(&vwire);
     switch (ret)
     {
         case VW_VSWITCH_UNREACHABLE:
@@ -374,10 +405,6 @@ int main(int argc, char **argv) {
             break;
     }
 
-    pthread_t send_thread_pid;
-    pthread_t recv_thread_pid;
-    pthread_t heartbeat_thread_pid;
-
     // Start two threads - one for receiving and one for sending
     pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, &vwire);
     pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, &vwire);
@@ -386,12 +413,6 @@ int main(int argc, char **argv) {
     pthread_join(send_thread_pid, NULL);
     pthread_join(recv_thread_pid, NULL);
     pthread_join(heartbeat_thread_pid, NULL);
-
-    // Close TAP interface UDP socket
-    close(tapfd);
-    close(sockfd);
-
-    pthread_mutex_destroy(&vwire.lock);
 
     return EXIT_SUCCESS;
 }
