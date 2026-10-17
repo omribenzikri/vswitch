@@ -391,15 +391,58 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
     }
 }
 
+int vw_start(vwire_t *vwire)
+{
+    pthread_t send_thread_pid;
+    pthread_t recv_thread_pid;
+    pthread_t heartbeat_thread_pid;
+    int ret;
+
+    ret = vw_conn_vswitch(vwire->sockfd);
+    switch (ret)
+    {
+        case 0:
+            log_message("Successfully connected to the vswitch", LOG_INFO);
+            break;
+        case -1:
+            return -1;
+        case VW_ERR_CONN_TIMEOUT:
+            log_message("Connection to vswitch timed out", LOG_ERROR);
+            return -1;
+        case VW_ERR_VSWITCH_FULL:
+            log_message("Cannot connect to vswitch since it has no available interfaces", LOG_ERROR);
+            return -1;
+        case VW_ERR_PROTO:
+            log_message("Protocol error encountered while connecting to vswitch", LOG_CRITICAL);
+            return -1;
+        default:
+            assert(false);
+    }
+
+    ret = pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, vwire)   ||
+          pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, vwire) ||
+          pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, vwire);
+    if (ret != 0) {
+        log_message("Failed to start essential threads", LOG_CRITICAL);
+        return -1;
+    }
+
+    ret = pthread_join(send_thread_pid, NULL) ||
+          pthread_join(recv_thread_pid, NULL) ||
+          pthread_join(heartbeat_thread_pid, NULL);
+    if (ret != 0) {
+        log_message("Failed to join with essential threads", LOG_CRITICAL);
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     vwire_t vwire = {0};
     struct in_addr vsw_addr;
     int ret;
-
-    pthread_t send_thread_pid;
-    pthread_t recv_thread_pid;
-    pthread_t heartbeat_thread_pid;
 
     if (argc != 3) {
         fprintf(stderr, "Usage: vwire ADDR TAP\n");
@@ -416,35 +459,11 @@ int main(int argc, char **argv)
     if (ret == -1)
         return EXIT_FAILURE;
 
-    ret = vw_conn_vswitch(vwire.sockfd);
-    switch (ret)
-    {
-        case 0:
-            log_message("Successfully connected to the vswitch", LOG_INFO);
-            break;
-        case -1:
-            return EXIT_FAILURE;
-        case VW_ERR_CONN_TIMEOUT:
-            log_message("Connection to vswitch timed out", LOG_ERROR);
-            return EXIT_FAILURE;
-        case VW_ERR_VSWITCH_FULL:
-            log_message("Cannot connect to vswitch since it is full", LOG_ERROR);
-            return EXIT_FAILURE;
-        case VW_ERR_PROTO:
-            log_message("Protocol error encountered while connecting to vswitch", LOG_CRITICAL);
-            return EXIT_FAILURE;
-        default:
-            assert(false);
-    }
+    ret = vw_start(&vwire);
+    if (ret == -1)
+        return EXIT_FAILURE;
 
-    // Start two threads - one for receiving and one for sending
-    pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, &vwire);
-    pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, &vwire);
-    pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, &vwire);
-
-    pthread_join(send_thread_pid, NULL);
-    pthread_join(recv_thread_pid, NULL);
-    pthread_join(heartbeat_thread_pid, NULL);
+    log_message("Gracefully exiting", LOG_INFO);
 
     return EXIT_SUCCESS;
 }
