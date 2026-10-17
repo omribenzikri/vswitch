@@ -63,11 +63,71 @@ error:
     return -1;
 }
 
-/*
-Attemps to connect to the vswitch by continously sending join requests
-until a response is received from the vswitch. If a response was received, it is returned,
-otherwise, -1 returned.
-*/
+int vw_sock_alloc(struct in_addr vsw_addr)
+{
+    struct sockaddr_in vsw_sockaddr = {0};
+    int sockfd;
+    int ret;
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd == -1) {
+        log_sys_error();
+        goto error;
+    }
+
+    vsw_sockaddr.sin_family = AF_INET;
+    vsw_sockaddr.sin_addr = vsw_addr;
+    vsw_sockaddr.sin_port = htons(VSW_UNDERLAY_PORT);
+
+    ret = connect(sockfd, (struct sockaddr *)&vsw_sockaddr,
+                  sizeof(vsw_sockaddr));
+    if (ret == -1) {
+        log_sys_error();
+        goto error_close_sock;
+    }
+
+    return sockfd;
+
+error_close_sock:
+    ret = close(sockfd);
+    if (ret == -1)
+        log_sys_error();
+error:
+    return -1;
+}
+
+int vw_alloc_resources(vwire_t *vwire, struct in_addr vsw_addr, const char *tap_name)
+{
+    int ret;
+
+    vwire->tapfd = vw_tap_alloc(tap_name);
+    if (vwire->tapfd == -1)
+        goto error;
+
+    log_message("Successfully opened TAP interface", LOG_INFO);
+
+    vwire->sockfd = vw_sock_alloc(vsw_addr);
+    if (vwire->sockfd == -1)
+        goto error_close_tap;
+
+    // TODO: remove this after removing all sendto & recvfrom
+    vwire->vsw_addr.sin_family = AF_INET;
+    vwire->vsw_addr.sin_addr = vsw_addr;
+    vwire->vsw_addr.sin_port = htons(VSW_UNDERLAY_PORT);
+
+    vwire->last_seen = time(NULL);
+    pthread_mutex_init(&vwire->lock, NULL);
+
+    return 0;
+
+error_close_tap:
+    ret = close(vwire->tapfd);
+    if (ret == -1)
+        log_sys_error();
+error:
+    return -1;
+}
+
 int vw_conn_vswitch(const vwire_t *vwire) {
     uint8_t req = VSW_CTRL_MSG_JOIN;
     uint8_t res;
@@ -329,39 +389,6 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
                 break;
         }
     }
-}
-
-int vw_alloc_resources(vwire_t *vwire, struct in_addr vsw_addr, const char *tap_name)
-{
-    int ret;
-
-    vwire->tapfd = vw_tap_alloc(tap_name);
-    if (vwire->tapfd == -1)
-        goto error;
-
-    log_message("Successfully opened TAP interface", LOG_INFO);
-
-    vwire->sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (vwire->sockfd == -1) {
-        log_sys_error();
-        goto error_close_tap;
-    }
-
-    vwire->vsw_addr.sin_family = AF_INET;
-    vwire->vsw_addr.sin_addr = vsw_addr;
-    vwire->vsw_addr.sin_port = htons(VSW_UNDERLAY_PORT);
-
-    vwire->last_seen = time(NULL);
-    pthread_mutex_init(&vwire->lock, NULL);
-
-    return 0;
-
-error_close_tap:
-    ret = close(vwire->tapfd);
-    if (ret == -1)
-        log_sys_error();
-error:
-    return -1;
 }
 
 int main(int argc, char **argv)
