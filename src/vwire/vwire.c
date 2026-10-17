@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <assert.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -17,11 +18,10 @@
 #include "util/logging.h"
 #include "proto.h"
 
+#define VW_CONN_MAX_RETRIES 5
+#define VW_CONN_TIMEOUT_SECS 2
 #define VW_HEARTBEAT_INTERVAL_SECS 2
-#define VW_JOIN_MAX_RETRIES 5
-#define VW_RECV_TIMEOUT_SECS 2
 #define VW_VSWITCH_MAX_INACTIVE_SECS 10
-#define VW_VSWITCH_UNREACHABLE -1
 
 typedef struct {
     int tapfd;
@@ -31,6 +31,11 @@ typedef struct {
     pthread_mutex_t lock;
 } vwire_t;
 
+typedef enum {
+    VW_ERR_CONN_TIMEOUT = 1,
+    VW_ERR_VSWITCH_FULL = 2,
+    VW_ERR_PROTO        = 3
+} vwire_err_t;
 
 int vw_tap_alloc(const char *name)
 {
@@ -128,79 +133,74 @@ error:
     return -1;
 }
 
-int vw_conn_vswitch(const vwire_t *vwire) {
+// This function assumes that a recv timeout is set on the socket
+int vw_init_conn(int sockfd)
+{
     uint8_t req = VSW_CTRL_MSG_JOIN;
-    uint8_t res;
+    uint8_t res[VSW_CTRL_HDR_SIZE];
     ssize_t bytes_recvd;
     ssize_t bytes_sent;
-    socklen_t vsw_addr_size;
-    int ret;
 
-    struct timeval timeout_tv = {
-        .tv_sec = VW_RECV_TIMEOUT_SECS,
+    bytes_sent = send(sockfd, &req, sizeof(req), 0);
+    if (bytes_sent == -1) {
+        log_sys_error();
+        return -1;
+    }
+
+    bytes_recvd = recv(sockfd, res, sizeof(res), 0);
+    if (bytes_recvd == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK)
+            return VW_ERR_CONN_TIMEOUT;
+
+        log_sys_error();
+        return -1;
+    }
+
+    switch (*res) {
+        case VSW_CTRL_MSG_FREE:
+            return 0;
+        case VSW_CTRL_MSG_FULL:
+            return VW_ERR_VSWITCH_FULL;
+        default:
+            return VW_ERR_PROTO;
+    }
+}
+
+int vw_conn_vswitch(int sockfd)
+{
+    int ret = 0;
+    int err;
+
+    const struct timeval timeout_tv = {
+        .tv_sec = VW_CONN_TIMEOUT_SECS,
         .tv_usec = 0
     };
-    struct timeval default_tv = {
+    const struct timeval default_timeout_tv = {
         .tv_sec = 0,
         .tv_usec = 0
     };
 
-    // Set a timeout for the recv call
-    ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout_tv, sizeof(timeout_tv));
-    if (ret == -1) {
+    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                     &timeout_tv, sizeof(timeout_tv));
+    if (err) {
         log_sys_error();
-        exit(EXIT_FAILURE);
+        return -1;
     }
 
-    for (int i = 0; i < VW_JOIN_MAX_RETRIES; i++) {
-        // Send a join request to the vswitch
-        bytes_sent = sendto(
-            vwire->sockfd,
-            &req,
-            sizeof(req),
-            0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            sizeof(vwire->vsw_addr)
-        );
-        if (bytes_sent == -1) {
-            log_sys_error();
-            exit(EXIT_FAILURE);
-        }
-        // Wait for a response from the vswitch
-        bytes_recvd = recvfrom(
-            vwire->sockfd,
-            &res,
-            sizeof(res),
-            0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            &vsw_addr_size
-        );
-        if (bytes_recvd == -1) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            }
-            log_sys_error();
-            exit(EXIT_FAILURE);
-        }
-        // Response received from vswitch
-        else if (bytes_recvd > 0) {
-            // Set timeout to the default
-            ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
-            if (ret == -1) {
-                log_sys_error();
-                exit(EXIT_FAILURE);
-            }
-            return res;
-        }
+    for (int i = 0; i < VW_CONN_MAX_RETRIES; i++) {
+        ret = vw_init_conn(sockfd);
+        if (ret != VW_ERR_CONN_TIMEOUT)
+            break;
     }
 
-    // No response received from vswitch, set timeout to the default
-    ret = setsockopt(vwire->sockfd, SOL_SOCKET, SO_RCVTIMEO, &default_tv, sizeof(default_tv));
-    if (ret == -1) {
+    err = setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO,
+                     &default_timeout_tv, sizeof(default_timeout_tv));
+    if (err) {
         log_sys_error();
-        exit(EXIT_FAILURE);
+        return -1;
     }
-    return VW_VSWITCH_UNREACHABLE;
+
+    return ret;
 }
 
 /*
@@ -416,20 +416,25 @@ int main(int argc, char **argv)
     if (ret == -1)
         return EXIT_FAILURE;
 
-    ret = vw_conn_vswitch(&vwire);
+    ret = vw_conn_vswitch(vwire.sockfd);
     switch (ret)
     {
-        case VW_VSWITCH_UNREACHABLE:
-            log_message("Connection to vswitch timed-out.", LOG_ERROR);
-            exit(EXIT_FAILURE);
+        case 0:
+            log_message("Successfully connected to the vswitch", LOG_INFO);
             break;
-        case VSW_CTRL_MSG_FULL:
-            log_message("Cannot connect to vswitch since it is full.", LOG_ERROR);
-            exit(EXIT_FAILURE);
-            break;
+        case -1:
+            return EXIT_FAILURE;
+        case VW_ERR_CONN_TIMEOUT:
+            log_message("Connection to vswitch timed out", LOG_ERROR);
+            return EXIT_FAILURE;
+        case VW_ERR_VSWITCH_FULL:
+            log_message("Cannot connect to vswitch since it is full", LOG_ERROR);
+            return EXIT_FAILURE;
+        case VW_ERR_PROTO:
+            log_message("Protocol error encountered while connecting to vswitch", LOG_CRITICAL);
+            return EXIT_FAILURE;
         default:
-            log_message("Successfully connected to the vswitch.", LOG_INFO);
-            break;
+            assert(false);
     }
 
     // Start two threads - one for receiving and one for sending
