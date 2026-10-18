@@ -2,8 +2,10 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <assert.h>
@@ -27,8 +29,7 @@ typedef struct {
     int tapfd;
     int sockfd;
     struct sockaddr_in vsw_addr;
-    time_t last_seen;
-    pthread_mutex_t lock;
+    _Atomic time_t vsw_last_seen;
 } vwire_t;
 
 typedef enum {
@@ -119,9 +120,6 @@ int vw_alloc_resources(vwire_t *vwire, struct in_addr vsw_addr, const char *tap_
     vwire->vsw_addr.sin_family = AF_INET;
     vwire->vsw_addr.sin_addr = vsw_addr;
     vwire->vsw_addr.sin_port = htons(VSW_UNDERLAY_PORT);
-
-    vwire->last_seen = time(NULL);
-    pthread_mutex_init(&vwire->lock, NULL);
 
     return 0;
 
@@ -216,32 +214,23 @@ void *vw_send_heartbeats(void *_vwire)
     uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
     int age;
-    int sockfd;
-    struct sockaddr_in vsw_addr;
-
-    pthread_mutex_lock(&vwire->lock);
-    sockfd = vwire->sockfd;
-    vsw_addr = vwire->vsw_addr;
-    pthread_mutex_unlock(&vwire->lock);
 
     // Send heartbeats in an infinite loop
     while (true) {
         // Check liveness of the vswitch connection
-        pthread_mutex_lock(&vwire->lock);
-        age = time(NULL) - vwire->last_seen;
+        age = time(NULL) - atomic_load(&vwire->vsw_last_seen);
         if (age > VW_VSWITCH_MAX_INACTIVE_SECS) {
             log_message("Connection to vswitch is no longer active, terminating.", LOG_INFO);
             exit(EXIT_SUCCESS);
         }
-        pthread_mutex_unlock(&vwire->lock);
 
         bytes_sent = sendto(
-            sockfd,
+            vwire->sockfd,
             &msg,
             sizeof(msg),
             0,
-            (struct sockaddr *)&vsw_addr,
-            sizeof(vsw_addr)
+            (struct sockaddr *)&vwire->vsw_addr,
+            sizeof(vwire->vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
@@ -265,24 +254,13 @@ void *vw_send_data_to_vswitch(void *_vwire) {
     ssize_t bytes_read;
     ssize_t bytes_sent;
 
-    // Shared attributes
-    int tapfd;
-    int sockfd;
-    struct sockaddr_in vsw_addr;
-
-    pthread_mutex_lock(&vwire->lock);
-    tapfd = vwire->tapfd;
-    sockfd = vwire->sockfd;
-    vsw_addr = vwire->vsw_addr;
-    pthread_mutex_unlock(&vwire->lock);
-
     // Set message type to regular traffic
     buf[0] = VSW_CTRL_MSG_TRAFFIC;
 
     while (true) {
         // Read an ethernet frame from the TAP interface
         bytes_read = read(
-            tapfd,
+            vwire->tapfd,
             buf + VSW_CTRL_HDR_SIZE,
             sizeof(buf) - VSW_CTRL_HDR_SIZE
         );
@@ -296,12 +274,12 @@ void *vw_send_data_to_vswitch(void *_vwire) {
 
         // Forward the frame through the socket
         bytes_sent = sendto(
-            sockfd,
+            vwire->sockfd,
             buf,
             bytes_read + VSW_CTRL_HDR_SIZE,
             0,
-            (struct sockaddr *)&vsw_addr,
-            sizeof(vsw_addr)
+            (struct sockaddr *)&vwire->vsw_addr,
+            sizeof(vwire->vsw_addr)
         );
         if (bytes_sent == -1) {
             log_sys_error();
@@ -327,25 +305,14 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
     ssize_t bytes_recvd;
     socklen_t vsw_addr_size;
 
-    // Shared attributes
-    int tapfd;
-    int sockfd;
-    struct sockaddr_in vsw_addr;
-
-    pthread_mutex_lock(&vwire->lock);
-    tapfd = vwire->tapfd;
-    sockfd = vwire->sockfd;
-    vsw_addr = vwire->vsw_addr;
-    pthread_mutex_unlock(&vwire->lock);
-
     while (true) {
         // Receive a frame from the socket
         bytes_recvd = recvfrom(
-            sockfd,
+            vwire->sockfd,
             buf,
             sizeof(buf),
             0,
-            (struct sockaddr *)&vsw_addr,
+            (struct sockaddr *)&vwire->vsw_addr,
             &vsw_addr_size
         );
         if (bytes_recvd == -1) {
@@ -368,7 +335,7 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
                     continue;
                 }
                 bytes_written = write(
-                    tapfd,
+                    vwire->tapfd,
                     ether_frame,
                     ether_frame_size
                 );
@@ -379,10 +346,8 @@ void *vw_recv_data_from_vswitch(void *_vwire) {
                 break;
 
             case VSW_CTRL_MSG_HEARTBEAT:
-                pthread_mutex_lock(&vwire->lock);
                 // vswitch heartbeat received, reset the last seen parameter
-                vwire->last_seen = time(NULL);
-                pthread_mutex_unlock(&vwire->lock);
+                atomic_store(&vwire->vsw_last_seen, time(NULL));
                 break;
 
             default:
@@ -419,9 +384,12 @@ int vw_start(vwire_t *vwire)
             assert(false);
     }
 
+    atomic_store(&vwire->vsw_last_seen, time(NULL));
+
     ret = pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, vwire)   ||
           pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, vwire) ||
           pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, vwire);
+
     if (ret != 0) {
         log_message("Failed to start essential threads", LOG_CRITICAL);
         return -1;
