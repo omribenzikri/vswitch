@@ -28,7 +28,6 @@
 typedef struct {
     int tapfd;
     int sockfd;
-    struct sockaddr_in vsw_addr;
     _Atomic time_t vsw_last_seen;
 } vwire_t;
 
@@ -116,11 +115,6 @@ int vw_alloc_resources(vwire_t *vwire, struct in_addr vsw_addr, const char *tap_
     vwire->sockfd = vw_sock_alloc(vsw_addr);
     if (vwire->sockfd == -1)
         goto error_close_tap;
-
-    // TODO: remove this after removing all sendto & recvfrom
-    vwire->vsw_addr.sin_family = AF_INET;
-    vwire->vsw_addr.sin_addr = vsw_addr;
-    vwire->vsw_addr.sin_port = htons(VSW_UNDERLAY_PORT);
 
     return 0;
 
@@ -238,45 +232,59 @@ void *vw_conn_keepalive(void *_vwire)
     }
 }
 
-/*
-Continously reads incoming data from the TAP interface and when it arrives,
-forwards it through the underlay UDP socket
-*/
-void *vw_send_data_to_vswitch(void *_vwire) {
-    vwire_t *vwire = (vwire_t *)_vwire;
+int vw_handle_incoming_packet(vwire_t *vwire, uint8_t *payload, size_t size)
+{
+    uint8_t *ether_frame;
+    size_t ether_frame_size;
+    ssize_t bytes_written;
 
-    // Buffer for storing read ethernet frames + extra bytes for custom tunnel encap
-    uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
+    switch (*payload)
+    {
+        case VSW_CTRL_MSG_TRAFFIC:
+            ether_frame = payload + VSW_CTRL_HDR_SIZE;
+            ether_frame_size = size - VSW_CTRL_HDR_SIZE;
+            if (ether_frame_size < ETHER_HDR_LEN)
+                return VW_ERR_PROTO;
+
+            bytes_written = write(vwire->tapfd, ether_frame, ether_frame_size);
+            if (bytes_written == -1) {
+                log_sys_error();
+                return -1;
+            }
+            break;
+
+        case VSW_CTRL_MSG_HEARTBEAT:
+            atomic_store(&vwire->vsw_last_seen, time(NULL));
+            break;
+
+        default:
+            return VW_ERR_PROTO;
+    }
+
+    return 0;
+}
+
+void *vw_send_packets_to_vswitch(void *_vwire)
+{
+    vwire_t *vwire = (vwire_t *)_vwire;
+    uint8_t payload[VSW_CTRL_HDR_SIZE + ETHER_MAX_LEN];
     ssize_t bytes_read;
     ssize_t bytes_sent;
 
-    // Set message type to regular traffic
-    buf[0] = VSW_CTRL_MSG_TRAFFIC;
+    payload[0] = VSW_CTRL_MSG_TRAFFIC;
 
     while (true) {
-        // Read an ethernet frame from the TAP interface
-        bytes_read = read(
-            vwire->tapfd,
-            buf + VSW_CTRL_HDR_SIZE,
-            sizeof(buf) - VSW_CTRL_HDR_SIZE
-        );
+        bytes_read = read(vwire->tapfd, payload + VSW_CTRL_HDR_SIZE, ETHER_MAX_LEN);
         if (bytes_read == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
-        else if (bytes_read <= ETHER_ADDR_LEN) {
+        else if (bytes_read < ETHER_HDR_LEN) {
+            log_message("Protocol error encountered while handling outgoing packet", LOG_ERROR);
             continue;
         }
 
-        // Forward the frame through the socket
-        bytes_sent = sendto(
-            vwire->sockfd,
-            buf,
-            bytes_read + VSW_CTRL_HDR_SIZE,
-            0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            sizeof(vwire->vsw_addr)
-        );
+        bytes_sent = send(vwire->sockfd, payload, VSW_CTRL_HDR_SIZE + bytes_read, 0);
         if (bytes_sent == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
@@ -284,70 +292,26 @@ void *vw_send_data_to_vswitch(void *_vwire) {
     }
 }
 
-/*
-Continously reads incoming data from the underlay socket.
-* Controlplane data is handeled appropriately
-* Dataplane date is forwarded via the tap to the linux kernel networking stack
-*/
-void *vw_recv_data_from_vswitch(void *_vwire) {
+void *vw_recv_packets_from_vswitch(void *_vwire)
+{
     vwire_t *vwire = (vwire_t *)_vwire;
-
-    // Buffer for storing received ethernet frames
-    uint8_t buf[ETHER_MAX_LEN + VSW_CTRL_HDR_SIZE];
-    uint8_t frame_type;
-    uint8_t *ether_frame;
-    size_t ether_frame_size;
-    ssize_t bytes_written;
+    uint8_t payload[VSW_CTRL_HDR_SIZE + ETHER_MAX_LEN];
     ssize_t bytes_recvd;
-    socklen_t vsw_addr_size;
+    int ret;
 
     while (true) {
-        // Receive a frame from the socket
-        bytes_recvd = recvfrom(
-            vwire->sockfd,
-            buf,
-            sizeof(buf),
-            0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            &vsw_addr_size
-        );
+        bytes_recvd = recv(vwire->sockfd, payload, sizeof(payload), 0);
         if (bytes_recvd == -1) {
             log_sys_error();
             exit(EXIT_FAILURE);
         }
 
-        if (bytes_recvd < VSW_CTRL_HDR_SIZE) {
+        ret = vw_handle_incoming_packet(vwire, payload, bytes_recvd);
+        if (ret == -1)
+            exit(EXIT_FAILURE);
+        if (ret == VW_ERR_PROTO) {
+            log_message("Protocol error encountered while handling incoming packet", LOG_ERROR);
             continue;
-        }
-        ether_frame = buf + VSW_CTRL_HDR_SIZE;
-        ether_frame_size = bytes_recvd - VSW_CTRL_HDR_SIZE;
-        frame_type = *buf;
-
-        switch (frame_type)
-        {
-            case VSW_CTRL_MSG_TRAFFIC:
-                // Dataplane frame received - write it to the TAP
-                if (ether_frame_size <= ETHER_HDR_LEN) {
-                    continue;
-                }
-                bytes_written = write(
-                    vwire->tapfd,
-                    ether_frame,
-                    ether_frame_size
-                );
-                if (bytes_written == -1) {
-                    log_sys_error();
-                    exit(EXIT_FAILURE);
-                }
-                break;
-
-            case VSW_CTRL_MSG_HEARTBEAT:
-                // vswitch heartbeat received, reset the last seen parameter
-                atomic_store(&vwire->vsw_last_seen, time(NULL));
-                break;
-
-            default:
-                break;
         }
     }
 }
@@ -382,8 +346,8 @@ int vw_start(vwire_t *vwire)
 
     atomic_store(&vwire->vsw_last_seen, time(NULL));
 
-    ret = pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, vwire)   ||
-          pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, vwire) ||
+    ret = pthread_create(&send_thread_pid, NULL, &vw_send_packets_to_vswitch, vwire)   ||
+          pthread_create(&recv_thread_pid, NULL, &vw_recv_packets_from_vswitch, vwire) ||
           pthread_create(&keepalive_thread_pid, NULL, &vw_conn_keepalive, vwire);
 
     if (ret != 0) {
