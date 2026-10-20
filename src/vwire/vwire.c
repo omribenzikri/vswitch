@@ -22,7 +22,7 @@
 
 #define VW_CONN_MAX_RETRIES 5
 #define VW_CONN_TIMEOUT_SECS 2
-#define VW_HEARTBEAT_INTERVAL_SECS 2
+#define VW_KEEPALIVE_INTERVAL_SECS 2
 #define VW_VSWITCH_MAX_INACTIVE_SECS 10
 
 typedef struct {
@@ -37,6 +37,7 @@ typedef enum {
     VW_ERR_VSWITCH_FULL = 2,
     VW_ERR_PROTO        = 3
 } vwire_err_t;
+
 
 int vw_tap_alloc(const char *name)
 {
@@ -132,7 +133,7 @@ error:
 }
 
 // This function assumes that a recv timeout is set on the socket
-int vw_init_conn(int sockfd)
+int vw_conn_init(int sockfd)
 {
     uint8_t req = VSW_CTRL_MSG_JOIN;
     uint8_t res[VSW_CTRL_HDR_SIZE];
@@ -186,7 +187,7 @@ int vw_conn_vswitch(int sockfd)
     }
 
     for (int i = 0; i < VW_CONN_MAX_RETRIES; i++) {
-        ret = vw_init_conn(sockfd);
+        ret = vw_conn_init(sockfd);
         if (ret != VW_ERR_CONN_TIMEOUT)
             break;
     }
@@ -201,44 +202,39 @@ int vw_conn_vswitch(int sockfd)
     return ret;
 }
 
-/*
-This function runs on a dedicated thread and is responsible for maintaining heartbeats with the vswitch.
-* Continously sends heartbeats messages to the vswitch to let it know the client is still alive.
-* Checks, at every iteration, that the time since the last vswitch heartbeat has not exceededa a threshold,
-  and if so, terminates the program.
-*/
-void *vw_send_heartbeats(void *_vwire)
+int vw_send_heartbeat(int sockfd)
 {
-    vwire_t *vwire = (vwire_t *)_vwire;
-
     uint8_t msg = VSW_CTRL_MSG_HEARTBEAT;
     ssize_t bytes_sent;
-    int age;
 
-    // Send heartbeats in an infinite loop
+    bytes_sent = send(sockfd, &msg, sizeof(msg), 0);
+    if (bytes_sent == -1) {
+        log_sys_error();
+        return -1;
+    }
+
+    return 0;
+}
+
+void *vw_conn_keepalive(void *_vwire)
+{
+    vwire_t *vwire = (vwire_t *)_vwire;
+    int age;
+    int ret;
+
     while (true) {
-        // Check liveness of the vswitch connection
         age = time(NULL) - atomic_load(&vwire->vsw_last_seen);
         if (age > VW_VSWITCH_MAX_INACTIVE_SECS) {
-            log_message("Connection to vswitch is no longer active, terminating.", LOG_INFO);
-            exit(EXIT_SUCCESS);
-        }
-
-        bytes_sent = sendto(
-            vwire->sockfd,
-            &msg,
-            sizeof(msg),
-            0,
-            (struct sockaddr *)&vwire->vsw_addr,
-            sizeof(vwire->vsw_addr)
-        );
-        if (bytes_sent == -1) {
-            log_sys_error();
+            log_message("Connection to vswitch is no longer active, terminating", LOG_WARNING);
             exit(EXIT_FAILURE);
         }
 
-        // Sleep until the next heartbeat
-        sleep(VW_HEARTBEAT_INTERVAL_SECS);
+        ret = vw_send_heartbeat(vwire->sockfd);
+        if (ret == -1)
+            exit(EXIT_FAILURE);
+
+
+        sleep(VW_KEEPALIVE_INTERVAL_SECS);
     }
 }
 
@@ -360,7 +356,7 @@ int vw_start(vwire_t *vwire)
 {
     pthread_t send_thread_pid;
     pthread_t recv_thread_pid;
-    pthread_t heartbeat_thread_pid;
+    pthread_t keepalive_thread_pid;
     int ret;
 
     ret = vw_conn_vswitch(vwire->sockfd);
@@ -388,7 +384,7 @@ int vw_start(vwire_t *vwire)
 
     ret = pthread_create(&send_thread_pid, NULL, &vw_send_data_to_vswitch, vwire)   ||
           pthread_create(&recv_thread_pid, NULL, &vw_recv_data_from_vswitch, vwire) ||
-          pthread_create(&heartbeat_thread_pid, NULL, &vw_send_heartbeats, vwire);
+          pthread_create(&keepalive_thread_pid, NULL, &vw_conn_keepalive, vwire);
 
     if (ret != 0) {
         log_message("Failed to start essential threads", LOG_CRITICAL);
@@ -397,7 +393,7 @@ int vw_start(vwire_t *vwire)
 
     ret = pthread_join(send_thread_pid, NULL) ||
           pthread_join(recv_thread_pid, NULL) ||
-          pthread_join(heartbeat_thread_pid, NULL);
+          pthread_join(keepalive_thread_pid, NULL);
     if (ret != 0) {
         log_message("Failed to join with essential threads", LOG_CRITICAL);
         return -1;
